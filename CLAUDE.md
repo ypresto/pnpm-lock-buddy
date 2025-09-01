@@ -1,0 +1,45 @@
+# CLAUDE.md
+
+## Coding Guidelines for CLAUDE
+
+- Coding Step (ignore for review)
+  - DO follow t-wada TDD rule
+  - DO run type checking or build, and formatter, before verifying your change including running test.
+  - DO printf debugging to debug test or runtime issue.
+  - DO determine error message before you run another edit or command
+  - DO write result of your work in ./z dir. `YYYY-MM-DD-HHMMSS-<task>.md` (use date command)
+  - DO report undone task
+  - DO use single line commit message with `Co-Authored-By: claude ...` for each task
+  - DO update task file checkbox after commit
+- Design
+  - DO follow Eric Evans DDD / Clean Architecture dependency rule, if use them.
+  - NEVER use hardcoded condition for variable that should receive arbitrary string or number from user input or caller.
+  - NEVER use alternative testing approach for server or MCP not available.
+- For TypeScript
+  - DO use type parameter over type assertion (`useState<Foo[]>([])` over `useState([] as Foo)`)
+  - NEVER use mocking. Extract pure function instead.
+  - NEVER use any, disable type checking nor disable lint until ordered by human.
+- For Go
+  - DO use testify/assert and testify/require for assertions
+    - Use lxtest.CmpArg() for struct argument
+  - DO use gocmp for check struct equality with 4 or more fields, or with array
+  - DO use table driven test for two or more test cases for same func.
+- For Frontend
+  - IMPORTANT: DO minimize number of state by using derived value (`f() -> a`).
+    - DO update parent state by callback if props should be updated by child.
+    - NEVER use `useEffect()` nor `watch()` to calculate derived value, especially just setting updated props to state.
+  - DO extract pure function for complicated logic
+  - DO use modern component format: function for React and `<script setup lang="ts">` for Vue
+  - DO reset form state with component lifecycle (Modal) or key="..." (non-Modal)
+  - NEVER `useFoo()` in outside of hooks (or composables, setup() , `<script setup>` in Vue)
+- For Vue
+  - DO use onFoo() instead of emit('foo')
+  - DO specify type annotation to computed() that returns object literal to avoid excess propreties
+  - NEVER use withDefaults()
+  - NEVER use reactive()
+- For Backend
+  - DO consider atomicity of DB and external service call
+  - DO use event publishing for heavy and eventual consistency allowed workload
+- For Code Reviews
+  - DO prioritize and reduce comment for same lines (type error is much important than indentation)
+  - NEVER include "not recommended" solutions
