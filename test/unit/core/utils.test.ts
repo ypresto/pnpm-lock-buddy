@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { packageExists, validatePackages } from "../../../src/core/utils";
+import {
+  packageExists,
+  validatePackages,
+  isLinkDependency,
+  findLinkDependencies,
+} from "../../../src/core/utils";
 import type { PnpmLockfile } from "../../../src/core/lockfile";
 
 describe("utils", () => {
@@ -87,6 +92,106 @@ describe("utils", () => {
 
       expect(result.existing).toEqual([]);
       expect(result.missing).toEqual(["missing1", "missing2"]);
+    });
+  });
+
+  describe("isLinkDependency", () => {
+    const mockLockfileWithLinks: PnpmLockfile = {
+      lockfileVersion: "9.0",
+      importers: {
+        ".": {
+          dependencies: {
+            express: { specifier: "4.18.2", version: "4.18.2" },
+            "@layerone/logger": {
+              specifier: "link:../logger",
+              version: "link:../logger",
+            },
+          },
+          devDependencies: {
+            "@local/utils": {
+              specifier: "link:./packages/utils",
+              version: "link:./packages/utils",
+            },
+          },
+        },
+      },
+      packages: {
+        "express@4.18.2": {
+          resolution: { integrity: "sha512-test" },
+        },
+      },
+    };
+
+    it("should return true for link dependencies", () => {
+      expect(isLinkDependency(mockLockfileWithLinks, "@layerone/logger")).toBe(
+        true,
+      );
+      expect(isLinkDependency(mockLockfileWithLinks, "@local/utils")).toBe(
+        true,
+      );
+    });
+
+    it("should return false for regular dependencies", () => {
+      expect(isLinkDependency(mockLockfileWithLinks, "express")).toBe(false);
+    });
+
+    it("should return false for non-existent packages", () => {
+      expect(isLinkDependency(mockLockfileWithLinks, "non-existent")).toBe(
+        false,
+      );
+    });
+  });
+
+  describe("findLinkDependencies", () => {
+    const mockLockfileWithLinks: PnpmLockfile = {
+      lockfileVersion: "9.0",
+      importers: {
+        ".": {
+          dependencies: {
+            express: { specifier: "4.18.2", version: "4.18.2" },
+            "@layerone/logger": {
+              specifier: "link:../logger",
+              version: "link:../logger",
+            },
+          },
+          devDependencies: {
+            "@local/utils": {
+              specifier: "link:./packages/utils",
+              version: "link:./packages/utils",
+            },
+          },
+        },
+      },
+      packages: {
+        "express@4.18.2": {
+          resolution: { integrity: "sha512-test" },
+        },
+      },
+    };
+
+    it("should find link dependencies among provided packages", () => {
+      const result = findLinkDependencies(mockLockfileWithLinks, [
+        "express",
+        "@layerone/logger",
+        "@local/utils",
+        "non-existent",
+      ]);
+
+      expect(result).toEqual(["@layerone/logger", "@local/utils"]);
+    });
+
+    it("should return empty array when no link dependencies found", () => {
+      const result = findLinkDependencies(mockLockfileWithLinks, [
+        "express",
+        "non-existent",
+      ]);
+
+      expect(result).toEqual([]);
+    });
+
+    it("should handle empty input", () => {
+      const result = findLinkDependencies(mockLockfileWithLinks, []);
+      expect(result).toEqual([]);
     });
   });
 });

@@ -1,6 +1,10 @@
 import { Command } from "commander";
 import { loadLockfile } from "../../core/lockfile.js";
 import { ListUsecase, type OutputFormat } from "../../usecases/list.usecase.js";
+import {
+  findLinkDependencies,
+  displayLinkDependencyWarning,
+} from "../../core/utils.js";
 import chalk from "chalk";
 
 export function createListCommand(): Command {
@@ -32,6 +36,12 @@ export function createListCommand(): Command {
         let results;
 
         if (packageName) {
+          // Check for link dependencies first
+          const linkDeps = findLinkDependencies(lockfile, [packageName]);
+          if (linkDeps.length > 0) {
+            displayLinkDependencyWarning(linkDeps);
+          }
+
           // Check if package exists
           if (!listUsecase.packageExists(packageName)) {
             console.error(

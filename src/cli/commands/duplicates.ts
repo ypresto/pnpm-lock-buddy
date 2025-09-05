@@ -4,6 +4,10 @@ import {
   DuplicatesUsecase,
   type OutputFormat,
 } from "../../usecases/duplicates.usecase.js";
+import {
+  findLinkDependencies,
+  displayLinkDependencyWarning,
+} from "../../core/utils.js";
 import chalk from "chalk";
 
 export function createDuplicatesCommand(): Command {
@@ -37,10 +41,15 @@ export function createDuplicatesCommand(): Command {
         // Create usecase
         const duplicatesUsecase = new DuplicatesUsecase(lockfile);
 
-        // Check if specified packages exist
+        // Check for link dependencies first
         if (packageNames.length > 0) {
-          const { missing } = duplicatesUsecase.packagesExist(packageNames);
+          const linkDeps = findLinkDependencies(lockfile, packageNames);
+          if (linkDeps.length > 0) {
+            displayLinkDependencyWarning(linkDeps);
+          }
 
+          // Check if packages exist
+          const { missing } = duplicatesUsecase.packagesExist(packageNames);
           if (missing.length > 0) {
             console.error(
               chalk.red(

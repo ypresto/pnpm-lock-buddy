@@ -1,6 +1,7 @@
 import type { PnpmLockfile } from "./lockfile.js";
 import { parsePackageString } from "./parser.js";
 import { traverseLockfile } from "./traverser.js";
+import chalk from "chalk";
 
 /**
  * Check if a package exists in the lockfile
@@ -49,4 +50,109 @@ export function validatePackages(
   }
 
   return { existing, missing };
+}
+
+/**
+ * Check if a package is a link dependency in the lockfile
+ */
+export function isLinkDependency(
+  lockfile: PnpmLockfile,
+  packageName: string,
+): boolean {
+  const { name: targetPackage } = parsePackageString(packageName);
+  let isLink = false;
+
+  traverseLockfile(lockfile, (context) => {
+    const { key, value, path } = context;
+
+    // Check in importers section for link dependencies
+    if (path[0] === "importers" && path.length === 4) {
+      const depType = path[2] as
+        | "dependencies"
+        | "devDependencies"
+        | "optionalDependencies";
+      const isDepSection = [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+      ].includes(depType);
+
+      if (isDepSection && key === targetPackage) {
+        const depInfo = value as { specifier: string; version: string };
+        if (depInfo.version.startsWith("link:")) {
+          isLink = true;
+          return false; // Stop traversal
+        }
+      }
+    }
+
+    return true; // Continue traversal
+  });
+
+  return isLink;
+}
+
+/**
+ * Find all link dependencies referenced by package names
+ */
+export function findLinkDependencies(
+  lockfile: PnpmLockfile,
+  packageNames: string[],
+): string[] {
+  if (packageNames.length === 0) return [];
+
+  const linkDeps: Set<string> = new Set();
+  const targetPackages = new Set(
+    packageNames.map((pkg) => parsePackageString(pkg).name),
+  );
+
+  traverseLockfile(lockfile, (context) => {
+    const { key, value, path } = context;
+
+    // Check in importers section for link dependencies
+    if (path[0] === "importers" && path.length === 4) {
+      const depType = path[2] as
+        | "dependencies"
+        | "devDependencies"
+        | "optionalDependencies";
+      const isDepSection = [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+      ].includes(depType);
+
+      if (isDepSection && targetPackages.has(key)) {
+        const depInfo = value as { specifier: string; version: string };
+        if (depInfo.version.startsWith("link:")) {
+          // Find original package name from the input list
+          const originalName = packageNames.find(
+            (pkg) => parsePackageString(pkg).name === key,
+          );
+          if (originalName) {
+            linkDeps.add(originalName);
+          }
+        }
+      }
+    }
+
+    return true; // Continue traversal
+  });
+
+  return Array.from(linkDeps);
+}
+
+/**
+ * Display warning message about link dependencies
+ */
+export function displayLinkDependencyWarning(linkDeps: string[]): void {
+  if (linkDeps.length === 0) return;
+
+  const packageList = linkDeps.map((pkg) => `"${pkg}"`).join(", ");
+  const isPlural = linkDeps.length > 1;
+
+  console.error(
+    chalk.yellow(
+      `Warning: Package${isPlural ? "s" : ""} ${packageList} ${isPlural ? "have" : "has"} link ${isPlural ? "dependencies" : "dependency"} and ${isPlural ? "might" : "might"} not be listed in the packages section of the lock file.`,
+    ),
+  );
 }
