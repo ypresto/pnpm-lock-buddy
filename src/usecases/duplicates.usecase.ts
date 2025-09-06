@@ -250,9 +250,10 @@ export class DuplicatesUsecase {
               version: inst.version,
               dependencies: inst.dependencies,
               // TODO: maybe inst.projects?
-              dependencyPath: this.getDirectDependencyType(
+              dependencyPath: this.getInstanceDependencyType(
                 importerPath,
                 pkg.packageName,
+                inst.id,
               ),
             })),
           })),
@@ -295,22 +296,74 @@ export class DuplicatesUsecase {
   }
 
   /**
-   * Get dependency type for a specific importer (for per-project view)
+   * Get dependency type for a specific instance of a package in an importer
    */
-  private getDirectDependencyType(
+  private getInstanceDependencyType(
     importerPath: string,
     packageName: string,
+    instanceId: string,
   ): string {
     const importerData = this.lockfile.importers[importerPath];
     if (!importerData) return "unknown";
 
-    // Check direct dependencies in this specific importer
-    if (importerData.dependencies?.[packageName]) {
-      return "dependencies";
-    } else if (importerData.devDependencies?.[packageName]) {
-      return "devDependencies";
-    } else if (importerData.optionalDependencies?.[packageName]) {
-      return "optionalDependencies";
+    // Check all dependency types to see which one matches this specific instance
+    const allDeps = {
+      ...importerData.dependencies,
+      ...importerData.devDependencies,
+      ...importerData.optionalDependencies,
+    };
+
+    // Find the dependency entry that matches this instance
+    for (const [depName, depInfo] of Object.entries(allDeps)) {
+      if (depName === packageName) {
+        // Check if this specific instance ID matches the version
+        if (
+          depInfo.version === instanceId ||
+          instanceId === `${packageName}@${depInfo.version}` ||
+          depInfo.version.startsWith(instanceId + "(") ||
+          instanceId.startsWith(`${packageName}@${depInfo.version}`)
+        ) {
+          // Determine the dependency type
+          if (importerData.dependencies?.[packageName]) {
+            return "dependencies";
+          } else if (importerData.devDependencies?.[packageName]) {
+            return "devDependencies";
+          } else if (importerData.optionalDependencies?.[packageName]) {
+            return "optionalDependencies";
+          }
+        }
+      }
+    }
+
+    // Check if this package comes through linked dependencies
+    const linkedDeps =
+      this.dependencyTracker.getLinkedDependencies(importerPath);
+    for (const linkedDep of linkedDeps) {
+      const linkedImporterData =
+        this.lockfile.importers[linkedDep.resolvedImporter];
+      if (linkedImporterData) {
+        const allLinkedDeps = {
+          ...linkedImporterData.dependencies,
+          ...linkedImporterData.devDependencies,
+          ...linkedImporterData.optionalDependencies,
+        };
+
+        // Check if this specific instance is from the linked dependency
+        for (const [linkedDepName, linkedDepInfo] of Object.entries(
+          allLinkedDeps,
+        )) {
+          if (linkedDepName === packageName) {
+            if (
+              linkedDepInfo.version === instanceId ||
+              instanceId === `${packageName}@${linkedDepInfo.version}` ||
+              linkedDepInfo.version.startsWith(instanceId + "(") ||
+              instanceId.startsWith(`${packageName}@${linkedDepInfo.version}`)
+            ) {
+              return "dependencies, linked";
+            }
+          }
+        }
+      }
     }
 
     return "transitive";

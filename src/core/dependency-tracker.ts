@@ -6,6 +6,12 @@ export interface DependencyInfo {
   directDependents: Set<string>; // Packages that directly depend on this package
 }
 
+export interface LinkedDependencyInfo {
+  sourceImporter: string; // 'apps/web'
+  linkName: string; // '@my/logger'
+  resolvedImporter: string; // 'packages/logger'
+}
+
 /**
  * Tracks transitive dependencies and provides lookup functionality
  * to find which importers ultimately use a given package
@@ -15,10 +21,51 @@ export class DependencyTracker {
   private dependencyMap = new Map<string, DependencyInfo>();
   private importerDependencies = new Map<string, Set<string>>(); // importer -> direct deps
   private importerCache = new Map<string, string[]>(); // packageId -> importers (cached)
+  private linkedDependencies = new Map<string, LinkedDependencyInfo[]>(); // importer -> linked deps
   private isInitialized = false;
 
   constructor(lockfile: PnpmLockfile) {
     this.lockfile = lockfile;
+  }
+
+  /**
+   * Resolve link path to target importer path
+   * Examples:
+   * - link:../packages/logger from apps/web → packages/logger
+   * - link:./packages/utils from . → packages/utils
+   */
+  private resolveLinkPath(
+    sourceImporter: string,
+    linkPath: string,
+  ): string | null {
+    // Remove 'link:' prefix
+    const relativePath = linkPath.replace(/^link:/, "");
+
+    if (sourceImporter === ".") {
+      // Root importer cases
+      if (relativePath.startsWith("./")) {
+        return relativePath.substring(2);
+      } else if (relativePath.startsWith("../")) {
+        return relativePath.substring(3);
+      } else {
+        return relativePath;
+      }
+    }
+
+    // Resolve relative path from source importer
+    const sourceParts = sourceImporter.split("/");
+    const relativeParts = relativePath.split("/");
+
+    for (const part of relativeParts) {
+      if (part === "..") {
+        sourceParts.pop();
+      } else if (part !== "." && part !== "") {
+        sourceParts.push(part);
+      }
+    }
+
+    const resolved = sourceParts.join("/");
+    return resolved || ".";
   }
 
   /**
@@ -56,20 +103,66 @@ export class DependencyTracker {
       };
 
       for (const [depName, depInfo] of Object.entries(allDeps || {})) {
-        // The version string might be just a version or include peer deps
-        // Try to find the actual snapshot ID
-        let snapshotId = depInfo.version;
+        // Check if this is a linked dependency
+        if (depInfo.version.startsWith("link:")) {
+          const resolvedImporter = this.resolveLinkPath(
+            importerPath,
+            depInfo.version,
+          );
 
-        // If the version string doesn't exist in snapshots, try to construct it
-        if (!this.lockfile.snapshots?.[snapshotId]) {
-          // Try with package name + version
-          const candidateId = `${depName}@${depInfo.version}`;
-          if (this.lockfile.snapshots?.[candidateId]) {
-            snapshotId = candidateId;
+          if (resolvedImporter && this.lockfile.importers[resolvedImporter]) {
+            // Track this linked dependency
+            if (!this.linkedDependencies.has(importerPath)) {
+              this.linkedDependencies.set(importerPath, []);
+            }
+            this.linkedDependencies.get(importerPath)!.push({
+              sourceImporter: importerPath,
+              linkName: depName,
+              resolvedImporter: resolvedImporter,
+            });
+
+            // Add all dependencies from the linked importer
+            const linkedImporterData =
+              this.lockfile.importers[resolvedImporter];
+            const linkedAllDeps = {
+              ...linkedImporterData.dependencies,
+              ...linkedImporterData.devDependencies,
+              ...linkedImporterData.optionalDependencies,
+            };
+
+            for (const [linkedDepName, linkedDepInfo] of Object.entries(
+              linkedAllDeps || {},
+            )) {
+              let snapshotId = linkedDepInfo.version;
+
+              // If the version string doesn't exist in snapshots, try to construct it
+              if (!this.lockfile.snapshots?.[snapshotId]) {
+                const candidateId = `${linkedDepName}@${linkedDepInfo.version}`;
+                if (this.lockfile.snapshots?.[candidateId]) {
+                  snapshotId = candidateId;
+                }
+              }
+
+              deps.add(snapshotId);
+            }
           }
-        }
+        } else {
+          // Regular dependency processing
+          // The version string might be just a version or include peer deps
+          // Try to find the actual snapshot ID
+          let snapshotId = depInfo.version;
 
-        deps.add(snapshotId);
+          // If the version string doesn't exist in snapshots, try to construct it
+          if (!this.lockfile.snapshots?.[snapshotId]) {
+            // Try with package name + version
+            const candidateId = `${depName}@${depInfo.version}`;
+            if (this.lockfile.snapshots?.[candidateId]) {
+              snapshotId = candidateId;
+            }
+          }
+
+          deps.add(snapshotId);
+        }
       }
 
       this.importerDependencies.set(importerPath, deps);
@@ -256,5 +349,14 @@ export class DependencyTracker {
 
     const depInfo = this.dependencyMap.get(packageId);
     return depInfo ? depInfo.importers.size > 0 : false;
+  }
+
+  /**
+   * Get linked dependencies for a given importer
+   */
+  getLinkedDependencies(importerPath: string): LinkedDependencyInfo[] {
+    this.initialize();
+
+    return this.linkedDependencies.get(importerPath) || [];
   }
 }

@@ -205,4 +205,135 @@ describe("DependencyTracker", () => {
       expect(result1).toBe(result2); // Same array reference due to caching
     });
   });
+
+  describe("linked dependencies", () => {
+    const linkedMockLockfile: PnpmLockfile = {
+      lockfileVersion: "9.0",
+      importers: {
+        ".": {
+          dependencies: {
+            express: { specifier: "^4.18.0", version: "4.18.2" },
+          },
+        },
+        "apps/web": {
+          dependencies: {
+            "@my/logger": {
+              specifier: "link:../../packages/logger",
+              version: "link:../../packages/logger",
+            },
+            react: { specifier: "18.2.0", version: "18.2.0" },
+          },
+        },
+        "packages/logger": {
+          dependencies: {
+            lodash: { specifier: "4.17.21", version: "4.17.21" },
+            chalk: { specifier: "^5.0.0", version: "5.0.0" },
+          },
+        },
+      },
+      packages: {
+        "express@4.18.2": {
+          resolution: { integrity: "sha512-express" },
+        },
+        "react@18.2.0": {
+          resolution: { integrity: "sha512-react" },
+        },
+        "lodash@4.17.21": {
+          resolution: { integrity: "sha512-lodash" },
+        },
+        "chalk@5.0.0": {
+          resolution: { integrity: "sha512-chalk" },
+        },
+      },
+      snapshots: {
+        "express@4.18.2": {},
+        "react@18.2.0": {},
+        "lodash@4.17.21": {},
+        "chalk@5.0.0": {},
+      },
+    };
+
+    it("should resolve linked dependencies and include transitive dependencies", () => {
+      const tracker = new DependencyTracker(linkedMockLockfile);
+
+      // apps/web should have access to lodash and chalk through the linked @my/logger
+      const lodashImporters = tracker.getImportersForPackage("lodash@4.17.21");
+      expect(lodashImporters).toContain("apps/web");
+
+      const chalkImporters = tracker.getImportersForPackage("chalk@5.0.0");
+      expect(chalkImporters).toContain("apps/web");
+
+      // packages/logger should also have access to its direct dependencies
+      expect(lodashImporters).toContain("packages/logger");
+      expect(chalkImporters).toContain("packages/logger");
+    });
+
+    it("should track linked dependency information", () => {
+      const tracker = new DependencyTracker(linkedMockLockfile);
+
+      const linkedDeps = tracker.getLinkedDependencies("apps/web");
+      expect(linkedDeps).toHaveLength(1);
+      expect(linkedDeps[0]).toEqual({
+        sourceImporter: "apps/web",
+        linkName: "@my/logger",
+        resolvedImporter: "packages/logger",
+      });
+    });
+
+    it("should handle multiple linked dependencies", () => {
+      const multiLinkedLockfile: PnpmLockfile = {
+        ...linkedMockLockfile,
+        importers: {
+          ...linkedMockLockfile.importers,
+          "apps/web": {
+            dependencies: {
+              "@my/logger": {
+                specifier: "link:../../packages/logger",
+                version: "link:../../packages/logger",
+              },
+              "@my/utils": {
+                specifier: "link:../../packages/utils",
+                version: "link:../../packages/utils",
+              },
+            },
+          },
+          "packages/utils": {
+            dependencies: {
+              ramda: { specifier: "0.29.0", version: "0.29.0" },
+            },
+          },
+        },
+        packages: {
+          ...linkedMockLockfile.packages,
+          "ramda@0.29.0": { resolution: { integrity: "sha512-ramda" } },
+        },
+        snapshots: {
+          ...linkedMockLockfile.snapshots,
+          "ramda@0.29.0": {},
+        },
+      };
+
+      const tracker = new DependencyTracker(multiLinkedLockfile);
+
+      // apps/web should have access to dependencies from both linked packages
+      const ramdalImporters = tracker.getImportersForPackage("ramda@0.29.0");
+      expect(ramdalImporters).toContain("apps/web");
+
+      const lodashImporters = tracker.getImportersForPackage("lodash@4.17.21");
+      expect(lodashImporters).toContain("apps/web");
+
+      // Check linked dependency tracking
+      const linkedDeps = tracker.getLinkedDependencies("apps/web");
+      expect(linkedDeps).toHaveLength(2);
+      expect(linkedDeps.map((dep) => dep.linkName)).toContain("@my/logger");
+      expect(linkedDeps.map((dep) => dep.linkName)).toContain("@my/utils");
+    });
+
+    it("should return empty array for importers without linked dependencies", () => {
+      const tracker = new DependencyTracker(linkedMockLockfile);
+
+      const linkedDeps = tracker.getLinkedDependencies(".");
+      expect(linkedDeps).toEqual([]);
+    });
+  });
 });
