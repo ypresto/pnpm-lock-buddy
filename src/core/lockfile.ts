@@ -17,6 +17,7 @@ export interface PnpmLockfile {
         string,
         { specifier: string; version: string }
       >;
+      peerDependencies?: Record<string, { specifier: string; version: string }>;
     };
   };
   packages: {

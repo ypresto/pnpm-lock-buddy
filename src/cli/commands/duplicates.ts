@@ -29,6 +29,10 @@ export function createDuplicatesCommand(): Command {
       'Filter by specific importer/project paths (e.g., "apps/web" "packages/ui")',
     )
     .option(
+      "--omit <types...>",
+      'Omit dependency types: "dev", "optional", "peer" (e.g., --omit=dev --omit=optional)',
+    )
+    .option(
       "--exit-code",
       "Exit with code 1 if duplicate packages are found (useful for CI/CD)",
     )
@@ -82,6 +86,7 @@ export function createDuplicatesCommand(): Command {
               showAll: options.all,
               packageFilter: packageNames.length > 0 ? packageNames : undefined,
               projectFilter: options.project,
+              omitTypes: options.omit,
             });
 
           hasDuplicates = perProjectDuplicates.length > 0;
@@ -133,6 +138,7 @@ export function createDuplicatesCommand(): Command {
             showAll: options.all,
             packageFilter: packageNames.length > 0 ? packageNames : undefined,
             projectFilter: options.project,
+            omitTypes: options.omit,
           });
 
           hasDuplicates = duplicates.length > 0;

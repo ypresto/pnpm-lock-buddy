@@ -13,6 +13,7 @@ export interface DuplicatesOptions {
   showAll?: boolean;
   packageFilter?: string[];
   projectFilter?: string[];
+  omitTypes?: string[]; // "dev", "optional", "peer"
 }
 
 export type OutputFormat = "tree" | "json";
@@ -45,6 +46,35 @@ export class DuplicatesUsecase {
 
   constructor(private lockfile: PnpmLockfile) {
     this.dependencyTracker = new DependencyTracker(lockfile);
+  }
+
+  /**
+   * Check if a dependency type should be omitted based on omitTypes filter
+   */
+  private shouldOmitDependencyType(
+    dependencyPath: string,
+    omitTypes?: string[],
+  ): boolean {
+    if (!omitTypes || omitTypes.length === 0) return false;
+
+    // Map CLI options to dependency types
+    const typeMapping = {
+      dev: ["devDependencies"],
+      optional: ["optionalDependencies"],
+      peer: ["peerDependencies"],
+    };
+
+    for (const omitType of omitTypes) {
+      const typesToCheck =
+        typeMapping[omitType as keyof typeof typeMapping] || [];
+      for (const typeToCheck of typesToCheck) {
+        if (dependencyPath.includes(typeToCheck)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -241,23 +271,44 @@ export class DuplicatesUsecase {
       );
 
       if (duplicatePackages.length > 0) {
-        results.push({
-          importerPath,
-          duplicatePackages: duplicatePackages.map((pkg) => ({
+        const filteredDuplicatePackages = duplicatePackages
+          .map((pkg) => ({
             packageName: pkg.packageName,
             instances: pkg.instances.map((inst) => ({
               id: inst.id,
               version: inst.version,
               dependencies: inst.dependencies,
-              // TODO: maybe inst.projects?
               dependencyPath: this.getInstanceDependencyType(
                 importerPath,
                 pkg.packageName,
                 inst.id,
               ),
             })),
-          })),
-        });
+          }))
+          .filter((pkg) => {
+            // Only omit the entire package if ALL instances should be omitted
+            if (!options.omitTypes || options.omitTypes.length === 0) {
+              return true; // No omit filter, keep all packages
+            }
+
+            // Check if all instances should be omitted
+            const allInstancesShouldBeOmitted = pkg.instances.every((inst) =>
+              this.shouldOmitDependencyType(
+                inst.dependencyPath,
+                options.omitTypes,
+              ),
+            );
+
+            return !allInstancesShouldBeOmitted; // Keep package if not all instances should be omitted
+          })
+          .filter((pkg) => pkg.instances.length > 1 || options.showAll); // Apply duplicate filter
+
+        if (filteredDuplicatePackages.length > 0) {
+          results.push({
+            importerPath,
+            duplicatePackages: filteredDuplicatePackages,
+          });
+        }
       }
     }
 
@@ -282,16 +333,19 @@ export class DuplicatesUsecase {
         types.add("devDependencies");
       } else if (importerData.optionalDependencies?.[packageName]) {
         types.add("optionalDependencies");
+      } else if (importerData.peerDependencies?.[packageName]) {
+        types.add("peerDependencies");
       } else {
         // It's transitive
         types.add("transitive");
       }
     }
 
-    // Return the most specific type with priority: devDependencies > optionalDependencies > dependencies
-    if (types.has("devDependencies")) return "devDependencies";
-    if (types.has("optionalDependencies")) return "optionalDependencies";
+    // Return the most specific type with priority: dependencies > optionalDependencies > peerDependencies > devDependencies
     if (types.has("dependencies")) return "dependencies";
+    if (types.has("optionalDependencies")) return "optionalDependencies";
+    if (types.has("peerDependencies")) return "peerDependencies";
+    if (types.has("devDependencies")) return "devDependencies";
     return "transitive";
   }
 
@@ -311,25 +365,29 @@ export class DuplicatesUsecase {
       ...importerData.dependencies,
       ...importerData.devDependencies,
       ...importerData.optionalDependencies,
+      ...importerData.peerDependencies,
     };
 
     // Find the dependency entry that matches this instance
     for (const [depName, depInfo] of Object.entries(allDeps)) {
       if (depName === packageName) {
+        const depVersion = (depInfo as { version: string }).version;
         // Check if this specific instance ID matches the version
         if (
-          depInfo.version === instanceId ||
-          instanceId === `${packageName}@${depInfo.version}` ||
-          depInfo.version.startsWith(instanceId + "(") ||
-          instanceId.startsWith(`${packageName}@${depInfo.version}`)
+          depVersion === instanceId ||
+          instanceId === `${packageName}@${depVersion}` ||
+          depVersion.startsWith(instanceId + "(") ||
+          instanceId.startsWith(`${packageName}@${depVersion}`)
         ) {
-          // Determine the dependency type
+          // Determine the dependency type with correct priority
           if (importerData.dependencies?.[packageName]) {
             return "dependencies";
-          } else if (importerData.devDependencies?.[packageName]) {
-            return "devDependencies";
           } else if (importerData.optionalDependencies?.[packageName]) {
             return "optionalDependencies";
+          } else if (importerData.peerDependencies?.[packageName]) {
+            return "peerDependencies";
+          } else if (importerData.devDependencies?.[packageName]) {
+            return "devDependencies";
           }
         }
       }
@@ -346,6 +404,7 @@ export class DuplicatesUsecase {
           ...linkedImporterData.dependencies,
           ...linkedImporterData.devDependencies,
           ...linkedImporterData.optionalDependencies,
+          ...linkedImporterData.peerDependencies,
         };
 
         // Check if this specific instance is from the linked dependency
@@ -353,19 +412,25 @@ export class DuplicatesUsecase {
           allLinkedDeps,
         )) {
           if (linkedDepName === packageName) {
+            const linkedDepVersion = (linkedDepInfo as { version: string })
+              .version;
             if (
-              linkedDepInfo.version === instanceId ||
-              instanceId === `${packageName}@${linkedDepInfo.version}` ||
-              linkedDepInfo.version.startsWith(instanceId + "(") ||
-              instanceId.startsWith(`${packageName}@${linkedDepInfo.version}`)
+              linkedDepVersion === instanceId ||
+              instanceId === `${packageName}@${linkedDepVersion}` ||
+              linkedDepVersion.startsWith(instanceId + "(") ||
+              instanceId.startsWith(`${packageName}@${linkedDepVersion}`)
             ) {
-              // Determine the original type in the linked package
-              if (linkedImporterData.devDependencies?.[packageName]) {
-                return "devDependencies, transitive via linked";
-              } else if (linkedImporterData.optionalDependencies?.[packageName]) {
-                return "optionalDependencies, transitive via linked";
-              } else if (linkedImporterData.dependencies?.[packageName]) {
+              // Determine the original type in the linked package with correct priority
+              if (linkedImporterData.dependencies?.[packageName]) {
                 return "dependencies, transitive via linked";
+              } else if (
+                linkedImporterData.optionalDependencies?.[packageName]
+              ) {
+                return "optionalDependencies, transitive via linked";
+              } else if (linkedImporterData.peerDependencies?.[packageName]) {
+                return "peerDependencies, transitive via linked";
+              } else if (linkedImporterData.devDependencies?.[packageName]) {
+                return "devDependencies, transitive via linked";
               }
               return "dependencies, transitive via linked"; // fallback
             }
@@ -375,7 +440,11 @@ export class DuplicatesUsecase {
     }
 
     // If not direct or linked, it's transitive - determine the path type
-    return this.getTransitiveDependencyType(importerPath, packageName, instanceId);
+    return this.getTransitiveDependencyType(
+      importerPath,
+      packageName,
+      instanceId,
+    );
   }
 
   /**
@@ -394,36 +463,71 @@ export class DuplicatesUsecase {
 
     // Check all direct dependencies to see which ones lead to this transitive dependency
     const allDirectDeps = [
-      ...Object.entries(importerData.dependencies || {}).map(([name, info]) => ({ name, info, type: "dependencies" })),
-      ...Object.entries(importerData.devDependencies || {}).map(([name, info]) => ({ name, info, type: "devDependencies" })),
-      ...Object.entries(importerData.optionalDependencies || {}).map(([name, info]) => ({ name, info, type: "optionalDependencies" })),
+      ...Object.entries(importerData.dependencies || {}).map(
+        ([name, info]) => ({ name, info, type: "dependencies" }),
+      ),
+      ...Object.entries(importerData.devDependencies || {}).map(
+        ([name, info]) => ({ name, info, type: "devDependencies" }),
+      ),
+      ...Object.entries(importerData.optionalDependencies || {}).map(
+        ([name, info]) => ({ name, info, type: "optionalDependencies" }),
+      ),
+      ...Object.entries(importerData.peerDependencies || {}).map(
+        ([name, info]) => ({ name, info, type: "peerDependencies" }),
+      ),
     ];
 
     // Also check linked dependencies
-    const linkedDeps = this.dependencyTracker.getLinkedDependencies(importerPath);
+    const linkedDeps =
+      this.dependencyTracker.getLinkedDependencies(importerPath);
     for (const linkedDep of linkedDeps) {
-      const linkedImporterData = this.lockfile.importers[linkedDep.resolvedImporter];
+      const linkedImporterData =
+        this.lockfile.importers[linkedDep.resolvedImporter];
       if (linkedImporterData) {
         allDirectDeps.push(
-          ...Object.entries(linkedImporterData.dependencies || {}).map(([name, info]) => ({ name, info, type: "dependencies" })),
-          ...Object.entries(linkedImporterData.devDependencies || {}).map(([name, info]) => ({ name, info, type: "devDependencies" })),
-          ...Object.entries(linkedImporterData.optionalDependencies || {}).map(([name, info]) => ({ name, info, type: "optionalDependencies" })),
+          ...Object.entries(linkedImporterData.dependencies || {}).map(
+            ([name, info]) => ({ name, info, type: "dependencies" }),
+          ),
+          ...Object.entries(linkedImporterData.devDependencies || {}).map(
+            ([name, info]) => ({ name, info, type: "devDependencies" }),
+          ),
+          ...Object.entries(linkedImporterData.optionalDependencies || {}).map(
+            ([name, info]) => ({ name, info, type: "optionalDependencies" }),
+          ),
+          ...Object.entries(linkedImporterData.peerDependencies || {}).map(
+            ([name, info]) => ({ name, info, type: "peerDependencies" }),
+          ),
         );
       }
     }
 
     // For each direct dependency, check if it leads to our target package
-    for (const { name: directDepName, info: directDepInfo, type: directDepType } of allDirectDeps) {
-      if (this.dependencyLeadsToPackage(directDepName, directDepInfo.version, packageName, instanceId)) {
+    for (const {
+      name: directDepName,
+      info: directDepInfo,
+      type: directDepType,
+    } of allDirectDeps) {
+      const directDepVersion = (directDepInfo as { version: string }).version;
+      if (
+        this.dependencyLeadsToPackage(
+          directDepName,
+          directDepVersion,
+          packageName,
+          instanceId,
+        )
+      ) {
         pathTypes.add(directDepType);
       }
     }
 
-    // Apply priority: devDependencies > optionalDependencies > dependencies
-    if (pathTypes.has("devDependencies")) return "devDependencies, transitive";
-    if (pathTypes.has("optionalDependencies")) return "optionalDependencies, transitive";
+    // Apply priority: dependencies > optionalDependencies > peerDependencies > devDependencies
     if (pathTypes.has("dependencies")) return "dependencies, transitive";
-    
+    if (pathTypes.has("optionalDependencies"))
+      return "optionalDependencies, transitive";
+    if (pathTypes.has("peerDependencies"))
+      return "peerDependencies, transitive";
+    if (pathTypes.has("devDependencies")) return "devDependencies, transitive";
+
     return "transitive";
   }
 
@@ -437,15 +541,21 @@ export class DuplicatesUsecase {
     targetInstanceId: string,
   ): boolean {
     // Simple implementation: check if the target package is in the importers that use this direct dependency
-    const directDepId = directDepVersion.includes('@') ? directDepVersion : `${directDepName}@${directDepVersion}`;
-    
+    const directDepId = directDepVersion.includes("@")
+      ? directDepVersion
+      : `${directDepName}@${directDepVersion}`;
+
     // Use dependency tracker to see if both packages are used by the same importers
     // This is a simplified approach - a full implementation would traverse the actual dependency graph
-    const directDepImporters = this.dependencyTracker.getImportersForPackage(directDepId);
-    const targetImporters = this.dependencyTracker.getImportersForPackage(targetInstanceId);
-    
+    const directDepImporters =
+      this.dependencyTracker.getImportersForPackage(directDepId);
+    const targetImporters =
+      this.dependencyTracker.getImportersForPackage(targetInstanceId);
+
     // If they share importers, there's likely a dependency relationship
-    return directDepImporters.some(importer => targetImporters.includes(importer));
+    return directDepImporters.some((importer) =>
+      targetImporters.includes(importer),
+    );
   }
 
   /**
