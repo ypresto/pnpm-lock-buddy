@@ -288,10 +288,10 @@ export class DuplicatesUsecase {
       }
     }
 
-    // Return the most specific type, prioritizing direct over transitive
-    if (types.has("dependencies")) return "dependencies";
+    // Return the most specific type with priority: devDependencies > optionalDependencies > dependencies
     if (types.has("devDependencies")) return "devDependencies";
     if (types.has("optionalDependencies")) return "optionalDependencies";
+    if (types.has("dependencies")) return "dependencies";
     return "transitive";
   }
 
@@ -359,14 +359,93 @@ export class DuplicatesUsecase {
               linkedDepInfo.version.startsWith(instanceId + "(") ||
               instanceId.startsWith(`${packageName}@${linkedDepInfo.version}`)
             ) {
-              return "dependencies, linked";
+              // Determine the original type in the linked package
+              if (linkedImporterData.devDependencies?.[packageName]) {
+                return "devDependencies, transitive via linked";
+              } else if (linkedImporterData.optionalDependencies?.[packageName]) {
+                return "optionalDependencies, transitive via linked";
+              } else if (linkedImporterData.dependencies?.[packageName]) {
+                return "dependencies, transitive via linked";
+              }
+              return "dependencies, transitive via linked"; // fallback
             }
           }
         }
       }
     }
 
+    // If not direct or linked, it's transitive - determine the path type
+    return this.getTransitiveDependencyType(importerPath, packageName, instanceId);
+  }
+
+  /**
+   * Get the dependency type for transitive dependencies by tracing the path
+   */
+  private getTransitiveDependencyType(
+    importerPath: string,
+    packageName: string,
+    instanceId: string,
+  ): string {
+    // Find all direct dependencies in this importer
+    const importerData = this.lockfile.importers[importerPath];
+    if (!importerData) return "transitive";
+
+    const pathTypes = new Set<string>();
+
+    // Check all direct dependencies to see which ones lead to this transitive dependency
+    const allDirectDeps = [
+      ...Object.entries(importerData.dependencies || {}).map(([name, info]) => ({ name, info, type: "dependencies" })),
+      ...Object.entries(importerData.devDependencies || {}).map(([name, info]) => ({ name, info, type: "devDependencies" })),
+      ...Object.entries(importerData.optionalDependencies || {}).map(([name, info]) => ({ name, info, type: "optionalDependencies" })),
+    ];
+
+    // Also check linked dependencies
+    const linkedDeps = this.dependencyTracker.getLinkedDependencies(importerPath);
+    for (const linkedDep of linkedDeps) {
+      const linkedImporterData = this.lockfile.importers[linkedDep.resolvedImporter];
+      if (linkedImporterData) {
+        allDirectDeps.push(
+          ...Object.entries(linkedImporterData.dependencies || {}).map(([name, info]) => ({ name, info, type: "dependencies" })),
+          ...Object.entries(linkedImporterData.devDependencies || {}).map(([name, info]) => ({ name, info, type: "devDependencies" })),
+          ...Object.entries(linkedImporterData.optionalDependencies || {}).map(([name, info]) => ({ name, info, type: "optionalDependencies" })),
+        );
+      }
+    }
+
+    // For each direct dependency, check if it leads to our target package
+    for (const { name: directDepName, info: directDepInfo, type: directDepType } of allDirectDeps) {
+      if (this.dependencyLeadsToPackage(directDepName, directDepInfo.version, packageName, instanceId)) {
+        pathTypes.add(directDepType);
+      }
+    }
+
+    // Apply priority: devDependencies > optionalDependencies > dependencies
+    if (pathTypes.has("devDependencies")) return "devDependencies, transitive";
+    if (pathTypes.has("optionalDependencies")) return "optionalDependencies, transitive";
+    if (pathTypes.has("dependencies")) return "dependencies, transitive";
+    
     return "transitive";
+  }
+
+  /**
+   * Check if a direct dependency leads to a target package through its dependency tree
+   */
+  private dependencyLeadsToPackage(
+    directDepName: string,
+    directDepVersion: string,
+    _targetPackageName: string,
+    targetInstanceId: string,
+  ): boolean {
+    // Simple implementation: check if the target package is in the importers that use this direct dependency
+    const directDepId = directDepVersion.includes('@') ? directDepVersion : `${directDepName}@${directDepVersion}`;
+    
+    // Use dependency tracker to see if both packages are used by the same importers
+    // This is a simplified approach - a full implementation would traverse the actual dependency graph
+    const directDepImporters = this.dependencyTracker.getImportersForPackage(directDepId);
+    const targetImporters = this.dependencyTracker.getImportersForPackage(targetInstanceId);
+    
+    // If they share importers, there's likely a dependency relationship
+    return directDepImporters.some(importer => targetImporters.includes(importer));
   }
 
   /**
