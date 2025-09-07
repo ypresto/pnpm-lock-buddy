@@ -284,6 +284,17 @@ export interface DuplicateInstance {
   }>;
 }
 
+export interface DependencyPathStep {
+  package: string;
+  type: string;
+  specifier: string;
+}
+
+export interface DependencyInfo {
+  typeSummary: string;
+  path: DependencyPathStep[];
+}
+
 export interface PerProjectDuplicate {
   importerPath: string;
   duplicatePackages: Array<{
@@ -292,7 +303,8 @@ export interface PerProjectDuplicate {
       id: string;
       version: string;
       dependencies: Record<string, string>;
-      dependencyPath: string;
+      dependencyInfo: DependencyInfo;
+      dependencyPath?: string; // Keep for backward compatibility
     }>;
   }>;
 }
@@ -333,11 +345,73 @@ export function formatDuplicates(
 }
 
 /**
+ * Convert dependency type to short notation
+ */
+function getTypeShortCode(type: string): string {
+  const typeMapping: Record<string, string> = {
+    dependencies: "d",
+    devDependencies: "D",
+    optionalDependencies: "o",
+    peerDependencies: "p",
+    transitive: "t",
+  };
+  return typeMapping[type] || type;
+}
+
+/**
+ * Format dependency tree in Option 2 style (Compact Tree with Type Labels)
+ * Example:
+ *   apps/docissue-webapp
+ *   ├─(D)─ some-framework@2.1.0
+ *   │  └─(d)─ intermediate-lib@1.5.0
+ *   │     └─(d)─ next-navigation-guard@0.1.2(next@15.2.1...)
+ */
+function formatDependencyTree(
+  path: DependencyPathStep[],
+  versionColor: (s: string) => string,
+  _useColor: boolean,
+): string[] {
+  if (path.length === 0) return [];
+
+  const lines: string[] = [];
+
+  for (let i = 0; i < path.length; i++) {
+    const step = path[i];
+    if (!step) continue;
+
+    const isLinked = step.specifier.startsWith("link:");
+    const typeCode = isLinked ? "L" : getTypeShortCode(step.type);
+
+    // Determine tree characters based on position
+    let prefix = "";
+    if (i === 0) {
+      // First step (after importer)
+      prefix = i === path.length - 1 ? "    └─" : "    ├─";
+    } else {
+      // Intermediate steps
+      const isLast = i === path.length - 1;
+      const parentSpacing = "    │  ";
+      prefix = isLast ? `${parentSpacing}└─` : `${parentSpacing}├─`;
+    }
+
+    const typeLabel = `(${typeCode})`;
+    // Only colorize the final leaf package (target)
+    const isLeaf = i === path.length - 1;
+    const packageName = isLeaf ? versionColor(step.package) : step.package;
+
+    lines.push(`${prefix}${typeLabel}─ ${packageName}`);
+  }
+
+  return lines;
+}
+
+/**
  * Format per-project duplicates similar to existing format but grouped by package then importer
  */
 export function formatPerProjectDuplicates(
   perProjectDuplicates: PerProjectDuplicate[],
   useColor = true,
+  showDependencyTree = false,
 ): string {
   if (perProjectDuplicates.length === 0) {
     return "No per-project duplicate packages found.";
@@ -380,10 +454,15 @@ export function formatPerProjectDuplicates(
       );
 
       for (const instance of group.instances) {
-        const typeInfo = instance.dependencyPath
-          ? ` (${instance.dependencyPath})`
-          : "";
-        lines.push(`    ${versionColor(instance.id)}${typeInfo}`);
+        if (showDependencyTree && instance.dependencyInfo) {
+          // Show dependency tree (Option 2 style)
+          const { path } = instance.dependencyInfo;
+          lines.push(`    ${group.importer}`);
+          lines.push(...formatDependencyTree(path, versionColor, useColor));
+        } else {
+          // Simple format without dependency paths
+          lines.push(`    ${versionColor(instance.id)}`);
+        }
       }
     }
   }

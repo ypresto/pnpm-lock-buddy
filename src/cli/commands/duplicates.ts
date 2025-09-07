@@ -32,6 +32,7 @@ export function createDuplicatesCommand(): Command {
       "--omit <types...>",
       'Omit dependency types: "dev", "optional", "peer" (e.g., --omit=dev --omit=optional)',
     )
+    .option("--deps", "Show dependency tree paths from root to target packages")
     .option(
       "--exit-code",
       "Exit with code 1 if duplicate packages are found (useful for CI/CD)",
@@ -115,6 +116,7 @@ export function createDuplicatesCommand(): Command {
             const output = duplicatesUsecase.formatPerProjectResults(
               perProjectDuplicates,
               options.output as OutputFormat,
+              options.deps,
             );
 
             console.log(output);

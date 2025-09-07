@@ -31,13 +31,24 @@ export interface PerProjectDuplicate {
   duplicatePackages: ProjectPackageDuplicate[];
 }
 
+export interface DependencyPathStep {
+  package: string;
+  type: string;
+  specifier: string;
+}
+
+export interface DependencyInfo {
+  typeSummary: string;
+  path: DependencyPathStep[];
+}
+
 export interface ProjectPackageDuplicate {
   packageName: string;
   instances: Array<{
     id: string;
     version: string;
     dependencies: Record<string, string>;
-    dependencyPath: string;
+    dependencyInfo: DependencyInfo;
   }>;
 }
 
@@ -278,7 +289,7 @@ export class DuplicatesUsecase {
               id: inst.id,
               version: inst.version,
               dependencies: inst.dependencies,
-              dependencyPath: this.getInstanceDependencyType(
+              dependencyInfo: this.getInstanceDependencyInfo(
                 importerPath,
                 pkg.packageName,
                 inst.id,
@@ -294,7 +305,7 @@ export class DuplicatesUsecase {
             // Check if all instances should be omitted
             const allInstancesShouldBeOmitted = pkg.instances.every((inst) =>
               this.shouldOmitDependencyType(
-                inst.dependencyPath,
+                inst.dependencyInfo.typeSummary,
                 options.omitTypes,
               ),
             );
@@ -350,118 +361,191 @@ export class DuplicatesUsecase {
   }
 
   /**
-   * Get dependency type for a specific instance of a package in an importer
+   * Get complete dependency information for a specific instance of a package in an importer
    */
-  private getInstanceDependencyType(
+  private getInstanceDependencyInfo(
     importerPath: string,
     packageName: string,
     instanceId: string,
-  ): string {
-    const importerData = this.lockfile.importers[importerPath];
-    if (!importerData) return "unknown";
+  ): DependencyInfo {
+    // Try to build dependency path
+    const path = this.buildDependencyPath(
+      importerPath,
+      packageName,
+      instanceId,
+    );
 
-    // Check all dependency types to see which one matches this specific instance
-    const allDeps = {
-      ...importerData.dependencies,
-      ...importerData.devDependencies,
-      ...importerData.optionalDependencies,
-      ...importerData.peerDependencies,
+    if (path.length === 0) {
+      // Fallback if we can't determine the path
+      return {
+        typeSummary: "transitive",
+        path: [
+          { package: instanceId, type: "transitive", specifier: "unknown" },
+        ],
+      };
+    }
+
+    // Determine type summary based on priority
+    const typeSummary = this.getTypeSummaryFromPath(path);
+
+    return {
+      typeSummary,
+      path,
     };
+  }
 
-    // Find the dependency entry that matches this instance
-    for (const [depName, depInfo] of Object.entries(allDeps)) {
-      if (depName === packageName) {
-        const depVersion = (depInfo as { version: string }).version;
-        // Check if this specific instance ID matches the version
+  /**
+   * Build the full dependency path from importer to target package
+   */
+  private buildDependencyPath(
+    importerPath: string,
+    packageName: string,
+    instanceId: string,
+  ): DependencyPathStep[] {
+    const importerData = this.lockfile.importers[importerPath];
+    if (!importerData) return [];
+
+    // Check if it's a direct dependency first
+    const directPath = this.checkDirectDependency(
+      importerData,
+      packageName,
+      instanceId,
+    );
+    if (directPath) return directPath;
+
+    // Check if it comes through linked dependencies
+    const linkedPath = this.checkLinkedDependency(
+      importerPath,
+      packageName,
+      instanceId,
+    );
+    if (linkedPath.length > 0) return linkedPath;
+
+    // For transitive dependencies, we'll implement a simplified version for now
+    // A full implementation would require traversing the actual dependency graph
+    return this.buildTransitivePath(importerPath, packageName, instanceId);
+  }
+
+  /**
+   * Check if package is a direct dependency and build single-step path
+   */
+  private checkDirectDependency(
+    importerData: any,
+    packageName: string,
+    instanceId: string,
+  ): DependencyPathStep[] | null {
+    const depTypes = [
+      { deps: importerData.dependencies, type: "dependencies" },
+      { deps: importerData.optionalDependencies, type: "optionalDependencies" },
+      { deps: importerData.peerDependencies, type: "peerDependencies" },
+      { deps: importerData.devDependencies, type: "devDependencies" },
+    ];
+
+    for (const { deps, type } of depTypes) {
+      if (deps?.[packageName]) {
+        const depInfo = deps[packageName];
+        const depVersion = depInfo.version;
+
+        // Check if this specific instance matches
         if (
           depVersion === instanceId ||
           instanceId === `${packageName}@${depVersion}` ||
           depVersion.startsWith(instanceId + "(") ||
           instanceId.startsWith(`${packageName}@${depVersion}`)
         ) {
-          // Determine the dependency type with correct priority
-          if (importerData.dependencies?.[packageName]) {
-            return "dependencies";
-          } else if (importerData.optionalDependencies?.[packageName]) {
-            return "optionalDependencies";
-          } else if (importerData.peerDependencies?.[packageName]) {
-            return "peerDependencies";
-          } else if (importerData.devDependencies?.[packageName]) {
-            return "devDependencies";
-          }
+          return [
+            {
+              package: instanceId,
+              type,
+              specifier: depInfo.specifier,
+            },
+          ];
         }
       }
     }
 
-    // Check if this package comes through linked dependencies
-    const linkedDeps =
-      this.dependencyTracker.getLinkedDependencies(importerPath);
-    for (const linkedDep of linkedDeps) {
-      const linkedImporterData =
-        this.lockfile.importers[linkedDep.resolvedImporter];
-      if (linkedImporterData) {
-        const allLinkedDeps = {
-          ...linkedImporterData.dependencies,
-          ...linkedImporterData.devDependencies,
-          ...linkedImporterData.optionalDependencies,
-          ...linkedImporterData.peerDependencies,
-        };
-
-        // Check if this specific instance is from the linked dependency
-        for (const [linkedDepName, linkedDepInfo] of Object.entries(
-          allLinkedDeps,
-        )) {
-          if (linkedDepName === packageName) {
-            const linkedDepVersion = (linkedDepInfo as { version: string })
-              .version;
-            if (
-              linkedDepVersion === instanceId ||
-              instanceId === `${packageName}@${linkedDepVersion}` ||
-              linkedDepVersion.startsWith(instanceId + "(") ||
-              instanceId.startsWith(`${packageName}@${linkedDepVersion}`)
-            ) {
-              // Determine the original type in the linked package with correct priority
-              if (linkedImporterData.dependencies?.[packageName]) {
-                return "dependencies, transitive via linked";
-              } else if (
-                linkedImporterData.optionalDependencies?.[packageName]
-              ) {
-                return "optionalDependencies, transitive via linked";
-              } else if (linkedImporterData.peerDependencies?.[packageName]) {
-                return "peerDependencies, transitive via linked";
-              } else if (linkedImporterData.devDependencies?.[packageName]) {
-                return "devDependencies, transitive via linked";
-              }
-              return "dependencies, transitive via linked"; // fallback
-            }
-          }
-        }
-      }
-    }
-
-    // If not direct or linked, it's transitive - determine the path type
-    return this.getTransitiveDependencyType(
-      importerPath,
-      packageName,
-      instanceId,
-    );
+    return null;
   }
 
   /**
-   * Get the dependency type for transitive dependencies by tracing the path
+   * Check if package comes through linked dependencies and build path
    */
-  private getTransitiveDependencyType(
+  private checkLinkedDependency(
     importerPath: string,
     packageName: string,
     instanceId: string,
-  ): string {
-    // Find all direct dependencies in this importer
+  ): DependencyPathStep[] {
+    const linkedDeps =
+      this.dependencyTracker.getLinkedDependencies(importerPath);
+
+    for (const linkedDep of linkedDeps) {
+      const linkedImporterData =
+        this.lockfile.importers[linkedDep.resolvedImporter];
+      if (!linkedImporterData) continue;
+
+      // Check if the target package exists in the linked dependency
+      const linkedDirectPath = this.checkDirectDependency(
+        linkedImporterData,
+        packageName,
+        instanceId,
+      );
+      if (linkedDirectPath) {
+        // Build path: link step + target step
+        // Find the actual specifier for the link
+        const importerData = this.lockfile.importers[importerPath];
+        let linkSpecifier = `link:${linkedDep.resolvedImporter}`;
+        let linkType = "dependencies";
+
+        // Find the actual link in the importer data
+        const allDeps = {
+          ...importerData?.dependencies,
+          ...importerData?.devDependencies,
+          ...importerData?.optionalDependencies,
+          ...importerData?.peerDependencies,
+        };
+
+        if (allDeps?.[linkedDep.linkName]) {
+          const linkInfo = allDeps[linkedDep.linkName];
+          linkSpecifier = (linkInfo as any).specifier;
+
+          // Determine link type
+          if (importerData?.dependencies?.[linkedDep.linkName])
+            linkType = "dependencies";
+          else if (importerData?.devDependencies?.[linkedDep.linkName])
+            linkType = "devDependencies";
+          else if (importerData?.optionalDependencies?.[linkedDep.linkName])
+            linkType = "optionalDependencies";
+          else if (importerData?.peerDependencies?.[linkedDep.linkName])
+            linkType = "peerDependencies";
+        }
+
+        const linkStep: DependencyPathStep = {
+          package: linkedDep.linkName,
+          type: linkType,
+          specifier: linkSpecifier,
+        };
+
+        return [linkStep, ...linkedDirectPath];
+      }
+    }
+
+    return [];
+  }
+
+  /**
+   * Build transitive dependency path (simplified implementation)
+   */
+  private buildTransitivePath(
+    importerPath: string,
+    _packageName: string,
+    instanceId: string,
+  ): DependencyPathStep[] {
+    // This is a simplified implementation
+    // A full implementation would traverse the actual dependency graph
     const importerData = this.lockfile.importers[importerPath];
-    if (!importerData) return "transitive";
+    if (!importerData) return [];
 
-    const pathTypes = new Set<string>();
-
-    // Check all direct dependencies to see which ones lead to this transitive dependency
+    // Find a direct dependency that likely leads to this package
     const allDirectDeps = [
       ...Object.entries(importerData.dependencies || {}).map(
         ([name, info]) => ({ name, info, type: "dependencies" }),
@@ -477,85 +561,41 @@ export class DuplicatesUsecase {
       ),
     ];
 
-    // Also check linked dependencies
-    const linkedDeps =
-      this.dependencyTracker.getLinkedDependencies(importerPath);
-    for (const linkedDep of linkedDeps) {
-      const linkedImporterData =
-        this.lockfile.importers[linkedDep.resolvedImporter];
-      if (linkedImporterData) {
-        allDirectDeps.push(
-          ...Object.entries(linkedImporterData.dependencies || {}).map(
-            ([name, info]) => ({ name, info, type: "dependencies" }),
-          ),
-          ...Object.entries(linkedImporterData.devDependencies || {}).map(
-            ([name, info]) => ({ name, info, type: "devDependencies" }),
-          ),
-          ...Object.entries(linkedImporterData.optionalDependencies || {}).map(
-            ([name, info]) => ({ name, info, type: "optionalDependencies" }),
-          ),
-          ...Object.entries(linkedImporterData.peerDependencies || {}).map(
-            ([name, info]) => ({ name, info, type: "peerDependencies" }),
-          ),
-        );
+    // For now, just return the target with the first dependency type that might lead to it
+    // This is simplified - real implementation would traverse snapshots
+    for (const { name, info, type } of allDirectDeps) {
+      const directDepId = info.version.includes("@")
+        ? info.version
+        : `${name}@${info.version}`;
+      const directImporters =
+        this.dependencyTracker.getImportersForPackage(directDepId);
+      const targetImporters =
+        this.dependencyTracker.getImportersForPackage(instanceId);
+
+      if (directImporters.some((imp) => targetImporters.includes(imp))) {
+        return [
+          { package: directDepId, type, specifier: info.specifier },
+          { package: instanceId, type: "dependencies", specifier: "unknown" },
+        ];
       }
     }
 
-    // For each direct dependency, check if it leads to our target package
-    for (const {
-      name: directDepName,
-      info: directDepInfo,
-      type: directDepType,
-    } of allDirectDeps) {
-      const directDepVersion = (directDepInfo as { version: string }).version;
-      if (
-        this.dependencyLeadsToPackage(
-          directDepName,
-          directDepVersion,
-          packageName,
-          instanceId,
-        )
-      ) {
-        pathTypes.add(directDepType);
-      }
-    }
-
-    // Apply priority: dependencies > optionalDependencies > peerDependencies > devDependencies
-    if (pathTypes.has("dependencies")) return "dependencies, transitive";
-    if (pathTypes.has("optionalDependencies"))
-      return "optionalDependencies, transitive";
-    if (pathTypes.has("peerDependencies"))
-      return "peerDependencies, transitive";
-    if (pathTypes.has("devDependencies")) return "devDependencies, transitive";
-
-    return "transitive";
+    // Fallback: just the target package
+    return [{ package: instanceId, type: "transitive", specifier: "unknown" }];
   }
 
   /**
-   * Check if a direct dependency leads to a target package through its dependency tree
+   * Determine type summary based on path with priority rules
    */
-  private dependencyLeadsToPackage(
-    directDepName: string,
-    directDepVersion: string,
-    _targetPackageName: string,
-    targetInstanceId: string,
-  ): boolean {
-    // Simple implementation: check if the target package is in the importers that use this direct dependency
-    const directDepId = directDepVersion.includes("@")
-      ? directDepVersion
-      : `${directDepName}@${directDepVersion}`;
+  private getTypeSummaryFromPath(path: DependencyPathStep[]): string {
+    const types = new Set(path.map((step) => step.type));
 
-    // Use dependency tracker to see if both packages are used by the same importers
-    // This is a simplified approach - a full implementation would traverse the actual dependency graph
-    const directDepImporters =
-      this.dependencyTracker.getImportersForPackage(directDepId);
-    const targetImporters =
-      this.dependencyTracker.getImportersForPackage(targetInstanceId);
-
-    // If they share importers, there's likely a dependency relationship
-    return directDepImporters.some((importer) =>
-      targetImporters.includes(importer),
-    );
+    // Apply priority: dependencies > optionalDependencies > peerDependencies > devDependencies
+    if (types.has("dependencies")) return "dependencies";
+    if (types.has("optionalDependencies")) return "optionalDependencies";
+    if (types.has("peerDependencies")) return "peerDependencies";
+    if (types.has("devDependencies")) return "devDependencies";
+    return "transitive";
   }
 
   /**
@@ -564,6 +604,7 @@ export class DuplicatesUsecase {
   formatPerProjectResults(
     perProjectDuplicates: PerProjectDuplicate[],
     format: OutputFormat = "tree",
+    showDependencyTree = false,
   ): string {
     if (format === "json") {
       // Create clean version without dependencies for JSON output
@@ -574,14 +615,18 @@ export class DuplicatesUsecase {
           instances: pkg.instances.map((inst) => ({
             id: inst.id,
             version: inst.version,
-            dependencyPath: inst.dependencyPath,
+            dependencyInfo: inst.dependencyInfo,
           })),
         })),
       }));
       return JSON.stringify(cleanPerProject, null, 2);
     }
 
-    return formatPerProjectDuplicates(perProjectDuplicates);
+    return formatPerProjectDuplicates(
+      perProjectDuplicates,
+      true,
+      showDependencyTree,
+    );
   }
 
   /**
