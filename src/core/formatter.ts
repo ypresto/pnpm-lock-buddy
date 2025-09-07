@@ -161,38 +161,54 @@ export function formatAsTree(
             lines.push(`       specifier: ${specifierColor(result.specifier)}`);
           }
 
-          // Check if we need to add a suffix number
-          let versionSuffix = "";
+          // Use result.version if available (for dependencies within snapshots)
+          if (result.version) {
+            const { baseVersion, peerDeps } = parseVersionWithPeers(
+              result.version,
+            );
 
-          // Extract version from package ID - find @ that's not inside parentheses
-          let versionPart = "";
-          let parenDepth = 0;
-          let lastValidAtIndex = -1;
-
-          for (let i = 0; i < packageId.length; i++) {
-            if (packageId[i] === "(") parenDepth++;
-            else if (packageId[i] === ")") parenDepth--;
-            else if (packageId[i] === "@" && parenDepth === 0 && i > 0) {
-              lastValidAtIndex = i;
-            }
-          }
-
-          if (lastValidAtIndex !== -1) {
-            versionPart = packageId.substring(lastValidAtIndex + 1);
-            const { peerDeps } = parseVersionWithPeers(versionPart);
-
-            if (peerDeps && versionTracker.has(versionPart)) {
-              versionSuffix = ` [${versionTracker.get(versionPart)}]`;
+            // Check if we need to add a suffix number
+            let versionSuffix = "";
+            if (peerDeps && versionTracker.has(result.version)) {
+              versionSuffix = ` [${versionTracker.get(result.version)}]`;
             }
 
-            // Extract just the version part from packageId
-            const { baseVersion: displayVersion, peerDeps: displayPeerDeps } =
-              parseVersionWithPeers(versionPart);
-
-            const formattedVersion = displayPeerDeps
-              ? `${versionColor(displayVersion)}${peerDepColor(displayPeerDeps)}${versionSuffix}`
-              : versionColor(displayVersion);
+            const formattedVersion = peerDeps
+              ? `${versionColor(baseVersion)}${peerDepColor(peerDeps)}${versionSuffix}`
+              : versionColor(result.version);
             lines.push(`       version: ${formattedVersion}`);
+          } else {
+            // Fallback: extract version from package ID if result.version is not available
+            let versionPart = "";
+            let parenDepth = 0;
+            let lastValidAtIndex = -1;
+
+            for (let i = 0; i < packageId.length; i++) {
+              if (packageId[i] === "(") parenDepth++;
+              else if (packageId[i] === ")") parenDepth--;
+              else if (packageId[i] === "@" && parenDepth === 0 && i > 0) {
+                lastValidAtIndex = i;
+              }
+            }
+
+            if (lastValidAtIndex !== -1) {
+              versionPart = packageId.substring(lastValidAtIndex + 1);
+              const { peerDeps } = parseVersionWithPeers(versionPart);
+
+              let versionSuffix = "";
+              if (peerDeps && versionTracker.has(versionPart)) {
+                versionSuffix = ` [${versionTracker.get(versionPart)}]`;
+              }
+
+              // Extract just the version part from packageId
+              const { baseVersion: displayVersion, peerDeps: displayPeerDeps } =
+                parseVersionWithPeers(versionPart);
+
+              const formattedVersion = displayPeerDeps
+                ? `${versionColor(displayVersion)}${peerDepColor(displayPeerDeps)}${versionSuffix}`
+                : versionColor(displayVersion);
+              lines.push(`       version: ${formattedVersion}`);
+            }
           }
         } else if (section === "importers") {
           // For importers, show the importer path and dependency info
