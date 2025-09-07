@@ -13,7 +13,7 @@ export function createListCommand(): Command {
     .description("Search for packages in pnpm-lock.yaml")
     .argument(
       "[package]",
-      'Package name to search for (e.g., "lodash" or "lodash@4.17.21"). If not provided, lists all packages.',
+      'Package name to search for, supports wildcards (e.g., "lodash" "react*" "@types/*"). If not provided, lists all packages.',
     )
     .option("-f, --file <path>", "Path to pnpm-lock.yaml file")
     .option(

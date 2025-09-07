@@ -1,7 +1,7 @@
 import type { PnpmLockfile } from "../core/lockfile.js";
 import { parsePackageString } from "../core/parser.js";
 import { traverseLockfile } from "../core/traverser.js";
-import { validatePackages } from "../core/utils.js";
+import { validatePackages, matchesAnyWildcard } from "../core/utils.js";
 import {
   formatDuplicates,
   formatPerProjectDuplicates,
@@ -164,8 +164,8 @@ export class DuplicatesUsecase {
     const duplicates: DuplicateInstance[] = [];
 
     for (const [packageName, instanceIds] of packageGroups.entries()) {
-      // Apply package filter if specified
-      if (packageFilter && !packageFilter.includes(packageName)) {
+      // Apply package filter if specified (with wildcard support)
+      if (packageFilter && !matchesAnyWildcard(packageName, packageFilter)) {
         continue;
       }
 

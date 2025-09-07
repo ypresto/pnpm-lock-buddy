@@ -16,7 +16,7 @@ export function createDuplicatesCommand(): Command {
     .description("Find packages with multiple installations")
     .argument(
       "[packages...]",
-      'Package names to filter (e.g., "react lodash @types/node")',
+      'Package names to filter, supports wildcards (e.g., "react*" "@types/*" "*eslint*")',
     )
     .option("-f, --file <path>", "Path to pnpm-lock.yaml file")
     .option("-a, --all", "Show all packages, not just duplicates")
@@ -46,22 +46,29 @@ export function createDuplicatesCommand(): Command {
         // Create usecase
         const duplicatesUsecase = new DuplicatesUsecase(lockfile);
 
-        // Check for link dependencies first
+        // Check for link dependencies first (only for non-wildcard patterns)
         if (packageNames.length > 0) {
-          const linkDeps = findLinkDependencies(lockfile, packageNames);
-          if (linkDeps.length > 0) {
-            displayLinkDependencyWarning(linkDeps);
-          }
+          const nonWildcardNames = packageNames.filter(
+            (name) => !name.includes("*"),
+          );
 
-          // Check if packages exist
-          const { missing } = duplicatesUsecase.packagesExist(packageNames);
-          if (missing.length > 0) {
-            console.error(
-              chalk.red(
-                `Error: Package${missing.length > 1 ? "s" : ""} "${missing.join(", ")}" not listed in the lock file`,
-              ),
-            );
-            process.exit(1);
+          if (nonWildcardNames.length > 0) {
+            const linkDeps = findLinkDependencies(lockfile, nonWildcardNames);
+            if (linkDeps.length > 0) {
+              displayLinkDependencyWarning(linkDeps);
+            }
+
+            // Check if non-wildcard packages exist
+            const { missing } =
+              duplicatesUsecase.packagesExist(nonWildcardNames);
+            if (missing.length > 0) {
+              console.error(
+                chalk.red(
+                  `Error: Package${missing.length > 1 ? "s" : ""} "${missing.join(", ")}" not listed in the lock file`,
+                ),
+              );
+              process.exit(1);
+            }
           }
         }
 

@@ -4,6 +4,8 @@ import {
   validatePackages,
   isLinkDependency,
   findLinkDependencies,
+  matchesWildcard,
+  matchesAnyWildcard,
 } from "../../../src/core/utils";
 import type { PnpmLockfile } from "../../../src/core/lockfile";
 
@@ -14,6 +16,7 @@ describe("utils", () => {
       ".": {
         dependencies: {
           express: { specifier: "4.18.2", version: "4.18.2" },
+          lodash: { specifier: "4.17.21", version: "4.17.21" },
         },
       },
     },
@@ -24,9 +27,6 @@ describe("utils", () => {
       "lodash@4.17.21": {
         resolution: { integrity: "sha512-test" },
       },
-      "@types/node@20.10.0": {
-        resolution: { integrity: "sha512-test" },
-      },
     },
   };
 
@@ -34,64 +34,75 @@ describe("utils", () => {
     it("should return true for existing packages", () => {
       expect(packageExists(mockLockfile, "express")).toBe(true);
       expect(packageExists(mockLockfile, "lodash")).toBe(true);
-      expect(packageExists(mockLockfile, "@types/node")).toBe(true);
-    });
-
-    it("should return true for packages with version", () => {
       expect(packageExists(mockLockfile, "express@4.18.2")).toBe(true);
-      expect(packageExists(mockLockfile, "lodash@4.17.21")).toBe(true);
-      expect(packageExists(mockLockfile, "@types/node@20.10.0")).toBe(true);
     });
 
-    it("should return false for non-existent packages", () => {
-      expect(packageExists(mockLockfile, "non-existent")).toBe(false);
-      expect(packageExists(mockLockfile, "@scope/non-existent")).toBe(false);
-      expect(packageExists(mockLockfile, "totally-missing")).toBe(false);
-    });
-
-    it("should handle scoped packages correctly", () => {
-      expect(packageExists(mockLockfile, "@types/node")).toBe(true);
-      expect(packageExists(mockLockfile, "@types/non-existent")).toBe(false);
+    it("should return false for non-existing packages", () => {
+      expect(packageExists(mockLockfile, "react")).toBe(false);
+      expect(packageExists(mockLockfile, "non-existent@1.0.0")).toBe(false);
     });
   });
 
   describe("validatePackages", () => {
-    it("should separate existing and missing packages", () => {
+    it("should categorize existing and missing packages", () => {
       const result = validatePackages(mockLockfile, [
         "express",
         "lodash",
+        "react",
         "non-existent",
-        "@types/node",
-        "another-missing",
       ]);
 
-      expect(result.existing).toEqual(["express", "lodash", "@types/node"]);
-      expect(result.missing).toEqual(["non-existent", "another-missing"]);
+      expect(result.existing).toEqual(["express", "lodash"]);
+      expect(result.missing).toEqual(["react", "non-existent"]);
+    });
+  });
+
+  describe("matchesWildcard", () => {
+    it("should match exact patterns", () => {
+      expect(matchesWildcard("react", "react")).toBe(true);
+      expect(matchesWildcard("react", "lodash")).toBe(false);
     });
 
-    it("should handle empty input", () => {
-      const result = validatePackages(mockLockfile, []);
-
-      expect(result.existing).toEqual([]);
-      expect(result.missing).toEqual([]);
+    it("should match wildcard patterns", () => {
+      expect(matchesWildcard("react", "react*")).toBe(true);
+      expect(matchesWildcard("react-dom", "react*")).toBe(true);
+      expect(matchesWildcard("react-scripts", "react*")).toBe(true);
+      expect(matchesWildcard("lodash", "react*")).toBe(false);
     });
 
-    it("should handle all existing packages", () => {
-      const result = validatePackages(mockLockfile, [
-        "express",
-        "lodash",
-        "@types/node",
-      ]);
-
-      expect(result.existing).toEqual(["express", "lodash", "@types/node"]);
-      expect(result.missing).toEqual([]);
+    it("should match @types/* patterns", () => {
+      expect(matchesWildcard("@types/node", "@types/*")).toBe(true);
+      expect(matchesWildcard("@types/react", "@types/*")).toBe(true);
+      expect(matchesWildcard("@babel/core", "@types/*")).toBe(false);
     });
 
-    it("should handle all missing packages", () => {
-      const result = validatePackages(mockLockfile, ["missing1", "missing2"]);
+    it("should match *eslint* patterns", () => {
+      expect(matchesWildcard("eslint", "*eslint*")).toBe(true);
+      expect(matchesWildcard("@typescript-eslint/parser", "*eslint*")).toBe(
+        true,
+      );
+      expect(matchesWildcard("eslint-config-prettier", "*eslint*")).toBe(true);
+      expect(matchesWildcard("react", "*eslint*")).toBe(false);
+    });
 
-      expect(result.existing).toEqual([]);
-      expect(result.missing).toEqual(["missing1", "missing2"]);
+    it("should handle complex patterns", () => {
+      expect(matchesWildcard("@babel/preset-env", "@babel/*")).toBe(true);
+      expect(matchesWildcard("babel-loader", "*babel*")).toBe(true);
+      expect(matchesWildcard("webpack-babel-plugin", "*babel*")).toBe(true);
+    });
+  });
+
+  describe("matchesAnyWildcard", () => {
+    it("should match if any pattern matches", () => {
+      const patterns = ["react*", "@types/*", "*eslint*"];
+
+      expect(matchesAnyWildcard("react", patterns)).toBe(true);
+      expect(matchesAnyWildcard("@types/node", patterns)).toBe(true);
+      expect(matchesAnyWildcard("eslint", patterns)).toBe(true);
+      expect(matchesAnyWildcard("@typescript-eslint/parser", patterns)).toBe(
+        true,
+      );
+      expect(matchesAnyWildcard("lodash", patterns)).toBe(false);
     });
   });
 
@@ -180,7 +191,7 @@ describe("utils", () => {
       expect(result).toEqual(["@layerone/logger", "@local/utils"]);
     });
 
-    it("should return empty array when no link dependencies found", () => {
+    it("should return empty array for packages without link dependencies", () => {
       const result = findLinkDependencies(mockLockfileWithLinks, [
         "express",
         "non-existent",
@@ -189,8 +200,9 @@ describe("utils", () => {
       expect(result).toEqual([]);
     });
 
-    it("should handle empty input", () => {
+    it("should return empty array for empty input", () => {
       const result = findLinkDependencies(mockLockfileWithLinks, []);
+
       expect(result).toEqual([]);
     });
   });

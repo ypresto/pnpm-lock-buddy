@@ -142,6 +142,40 @@ export function findLinkDependencies(
 }
 
 /**
+ * Check if a package name matches a wildcard pattern
+ * Supports * wildcard matching
+ * Examples:
+ * - "react*" matches "react", "react-dom", "react-scripts"
+ * - "@types/*" matches "@types/node", "@types/react"
+ * - "*eslint*" matches "eslint", "@typescript-eslint/parser"
+ */
+export function matchesWildcard(packageName: string, pattern: string): boolean {
+  // If no wildcard, use exact match
+  if (!pattern.includes("*")) {
+    return packageName === pattern;
+  }
+
+  // Convert wildcard pattern to regex
+  // Escape special regex characters except *
+  const escapedPattern = pattern
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&") // Escape special chars
+    .replace(/\*/g, ".*"); // Convert * to .*
+
+  const regex = new RegExp(`^${escapedPattern}$`);
+  return regex.test(packageName);
+}
+
+/**
+ * Check if a package name matches any of the wildcard patterns
+ */
+export function matchesAnyWildcard(
+  packageName: string,
+  patterns: string[],
+): boolean {
+  return patterns.some((pattern) => matchesWildcard(packageName, pattern));
+}
+
+/**
  * Display warning message about link dependencies
  */
 export function displayLinkDependencyWarning(linkDeps: string[]): void {
