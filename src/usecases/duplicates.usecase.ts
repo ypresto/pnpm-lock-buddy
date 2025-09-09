@@ -681,46 +681,93 @@ export class DuplicatesUsecase {
 
     if (!snapshotData) return [];
 
-    // Check all subdependencies
-    const subDeps = {
-      ...snapshotData.dependencies,
-      ...snapshotData.optionalDependencies,
-    };
+    // Check dependencies by type to preserve type information
+    const depTypes = [
+      { deps: snapshotData.dependencies, type: "dependencies" },
+      { deps: snapshotData.optionalDependencies, type: "optionalDependencies" },
+      { deps: snapshotData.peerDependencies, type: "peerDependencies" },
+      { deps: snapshotData.devDependencies, type: "devDependencies" },
+    ];
 
-    for (const [subDepName, subDepVersion] of Object.entries(subDeps || {})) {
-      const subDepId =
-        this.findSnapshotId(subDepName, subDepVersion) ||
-        `${subDepName}@${subDepVersion}`;
+    for (const { deps, type } of depTypes) {
+      for (const [subDepName, subDepVersion] of Object.entries(deps || {})) {
+        const subDepVersionStr = subDepVersion as string;
+        const subDepId =
+          this.findSnapshotId(subDepName, subDepVersionStr) ||
+          `${subDepName}@${subDepVersionStr}`;
 
-      // Check if this subdependency is our target
-      if (subDepId === targetPackageId) {
-        return [
-          {
-            package: targetPackageId,
-            type: "dependencies",
-            specifier: subDepVersion,
-          },
-        ];
-      }
+        // Check if this subdependency is our target
+        if (subDepId === targetPackageId) {
+          // Check if this dependency is actually a peer dependency in the package definition
+          const actualType = this.getActualDependencyType(
+            startPackageId,
+            subDepName,
+            type as string,
+          );
+          return [
+            {
+              package: targetPackageId,
+              type: actualType,
+              specifier: subDepVersionStr,
+            },
+          ];
+        }
 
-      // Recursively search deeper
-      const deeperPath = this.dfsWithLimits(
-        subDepId,
-        targetPackageId,
-        new Set(visited),
-        depth + 1,
-      );
-      if (deeperPath.length > 0) {
-        const intermediateStep: DependencyPathStep = {
-          package: subDepId,
-          type: "dependencies",
-          specifier: subDepVersion,
-        };
-        return [intermediateStep, ...deeperPath];
+        // Recursively search deeper
+        const deeperPath = this.dfsWithLimits(
+          subDepId,
+          targetPackageId,
+          new Set(visited),
+          depth + 1,
+        );
+        if (deeperPath.length > 0) {
+          // Check actual dependency type for intermediate step too
+          const actualType = this.getActualDependencyType(
+            startPackageId,
+            subDepName,
+            type as string,
+          );
+          const intermediateStep: DependencyPathStep = {
+            package: subDepId,
+            type: actualType,
+            specifier: subDepVersionStr,
+          };
+          return [intermediateStep, ...deeperPath];
+        }
       }
     }
 
     return [];
+  }
+
+  /**
+   * Get the actual dependency type by checking package definition for peer dependencies
+   */
+  private getActualDependencyType(
+    packageId: string,
+    depName: string,
+    snapshotType: string,
+  ): string {
+    // Get the base package ID without peer dependency context
+    const basePkgId = packageId.split("(")[0];
+
+    // Check package definition for peer dependencies
+    if (this.lockfile.packages && basePkgId) {
+      const basePkg = this.lockfile.packages[basePkgId];
+      if (basePkg?.peerDependencies?.[depName]) {
+        // This is actually a peer dependency, even though snapshot shows it as regular
+        return "peerDependencies";
+      }
+
+      // Also check packages with full peer context
+      const fullPkg = this.lockfile.packages[packageId];
+      if (fullPkg?.peerDependencies?.[depName]) {
+        return "peerDependencies";
+      }
+    }
+
+    // Fall back to snapshot type
+    return snapshotType;
   }
 
   /**
