@@ -34,6 +34,11 @@ export function createDuplicatesCommand(): Command {
     )
     .option("--deps", "Show dependency tree paths from root to target packages")
     .option(
+      "--max-depth <number>",
+      "Maximum depth for dependency path traversal (default: 10)",
+      "10",
+    )
+    .option(
       "--exit-code",
       "Exit with code 1 if duplicate packages are found (useful for CI/CD)",
     )
@@ -95,6 +100,7 @@ export function createDuplicatesCommand(): Command {
               packageFilter: packageNames.length > 0 ? packageNames : undefined,
               projectFilter: options.project,
               omitTypes: options.omit,
+              maxDepth: parseInt(options.maxDepth),
             });
 
           hasDuplicates = perProjectDuplicates.length > 0;
@@ -124,6 +130,7 @@ export function createDuplicatesCommand(): Command {
               perProjectDuplicates,
               options.output as OutputFormat,
               options.deps,
+              parseInt(options.maxDepth),
             );
 
             console.log(output);

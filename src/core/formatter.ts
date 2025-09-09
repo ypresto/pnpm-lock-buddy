@@ -398,15 +398,15 @@ function formatDependencyTree(
     const isLinked = step.specifier.startsWith("link:");
     const typeCode = isLinked ? "L" : getTypeShortCode(step.type);
 
-    // Determine tree characters based on position
+    // Determine tree characters based on position with proper depth indentation
     let prefix = "";
     if (i === 0) {
       // First step (after importer)
       prefix = i === path.length - 1 ? "    └─" : "    ├─";
     } else {
-      // Intermediate steps
+      // Intermediate steps with increasing indentation
       const isLast = i === path.length - 1;
-      const parentSpacing = "    │  ";
+      const parentSpacing = "    " + "│  ".repeat(i);
       prefix = isLast ? `${parentSpacing}└─` : `${parentSpacing}├─`;
     }
 
@@ -471,10 +471,21 @@ export function formatPerProjectDuplicates(
 
       for (const instance of group.instances) {
         if (showDependencyTree && instance.dependencyInfo) {
-          // Show dependency tree (Option 2 style)
+          // Show dependency tree (Option 2 style) only if we have a real path
           const { path } = instance.dependencyInfo;
-          lines.push(`    ${group.importer}`);
-          lines.push(...formatDependencyTree(path, versionColor, useColor));
+
+          // Don't show fake (t) connections - only show real traced paths
+          const hasRealPath =
+            path.length > 1 ||
+            (path.length === 1 && path[0].type !== "transitive");
+
+          if (hasRealPath) {
+            lines.push(`    ${group.importer}`);
+            lines.push(...formatDependencyTree(path, versionColor, useColor));
+          } else {
+            // Can't trace path - just show the package without fake tree
+            lines.push(`    ${versionColor(instance.id)}`);
+          }
         } else {
           // Simple format without dependency paths
           lines.push(`    ${versionColor(instance.id)}`);

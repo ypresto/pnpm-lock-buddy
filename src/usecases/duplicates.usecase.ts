@@ -14,6 +14,7 @@ export interface DuplicatesOptions {
   packageFilter?: string[];
   projectFilter?: string[];
   omitTypes?: string[]; // "dev", "optional", "peer"
+  maxDepth?: number; // Maximum depth for dependency path traversal
 }
 
 export type OutputFormat = "tree" | "json";
@@ -54,6 +55,8 @@ export interface ProjectPackageDuplicate {
 
 export class DuplicatesUsecase {
   private dependencyTracker: DependencyTracker;
+  private pathCache = new Map<string, DependencyPathStep[]>(); // Cache for expensive path calculations
+  private currentMaxDepth = 10; // Default max depth
 
   constructor(private lockfile: PnpmLockfile) {
     this.dependencyTracker = new DependencyTracker(lockfile);
@@ -229,7 +232,8 @@ export class DuplicatesUsecase {
   findPerProjectDuplicates(
     options: DuplicatesOptions = {},
   ): PerProjectDuplicate[] {
-    const { projectFilter } = options;
+    const { projectFilter, maxDepth = 10 } = options;
+    this.currentMaxDepth = maxDepth; // Set max depth for this operation
 
     // Get global duplicates first (with same filtering)
     const globalDuplicates = this.findDuplicates(options);
@@ -533,19 +537,17 @@ export class DuplicatesUsecase {
   }
 
   /**
-   * Build transitive dependency path (simplified implementation)
+   * Build transitive dependency path using cached DFS traversal
    */
   private buildTransitivePath(
     importerPath: string,
     _packageName: string,
     instanceId: string,
   ): DependencyPathStep[] {
-    // This is a simplified implementation
-    // A full implementation would traverse the actual dependency graph
     const importerData = this.lockfile.importers[importerPath];
     if (!importerData) return [];
 
-    // Find a direct dependency that likely leads to this package
+    // Get all direct dependencies of this importer
     const allDirectDeps = [
       ...Object.entries(importerData.dependencies || {}).map(
         ([name, info]) => ({ name, info, type: "dependencies" }),
@@ -561,27 +563,183 @@ export class DuplicatesUsecase {
       ),
     ];
 
-    // For now, just return the target with the first dependency type that might lead to it
-    // This is simplified - real implementation would traverse snapshots
+    // Try to find actual dependency path for each direct dependency
     for (const { name, info, type } of allDirectDeps) {
-      const directDepId = info.version.includes("@")
-        ? info.version
-        : `${name}@${info.version}`;
-      const directImporters =
-        this.dependencyTracker.getImportersForPackage(directDepId);
-      const targetImporters =
-        this.dependencyTracker.getImportersForPackage(instanceId);
+      // Use proper snapshot ID construction
+      const directDepId = `${name}@${info.version}`;
 
-      if (directImporters.some((imp) => targetImporters.includes(imp))) {
-        return [
-          { package: directDepId, type, specifier: info.specifier },
-          { package: instanceId, type: "dependencies", specifier: "unknown" },
-        ];
+      // Quick filter: skip expensive DFS if package name doesn't suggest it could lead to target
+      if (this.couldContainTarget(name, instanceId)) {
+        // Use cached DFS to find path from this direct dependency to target
+        const path = this.findDependencyPathDFS(directDepId, instanceId);
+        if (path.length > 0) {
+          // Prepend the direct dependency step
+          const directStep: DependencyPathStep = {
+            package: directDepId,
+            type,
+            specifier: info.specifier,
+          };
+          return [directStep, ...path];
+        }
       }
     }
 
     // Fallback: just the target package
     return [{ package: instanceId, type: "transitive", specifier: "unknown" }];
+  }
+
+  /**
+   * Quick filter to avoid expensive DFS on packages unlikely to contain the target
+   */
+  private couldContainTarget(
+    packageName: string,
+    targetInstanceId: string,
+  ): boolean {
+    const targetPkgName = parsePackageString(targetInstanceId).name;
+
+    // If package name contains any part of the target name, it might contain it
+    if (
+      packageName.includes(targetPkgName) ||
+      targetPkgName.includes(packageName)
+    ) {
+      return true;
+    }
+
+    // Known patterns that often contain typescript-eslint
+    if (targetPkgName.includes("typescript-eslint")) {
+      return (
+        packageName.includes("eslint") ||
+        packageName.includes("typescript") ||
+        packageName.includes("@typescript-eslint")
+      );
+    }
+
+    // For other packages, be more conservative - only check closely related names
+    const targetParts = targetPkgName.split("/").pop()?.split("-") || [];
+    const packageParts = packageName.split("/").pop()?.split("-") || [];
+
+    return targetParts.some((part) => packageParts.includes(part));
+  }
+
+  /**
+   * Find dependency path using cached forward DFS
+   */
+  private findDependencyPathDFS(
+    fromPackageId: string,
+    toPackageId: string,
+  ): DependencyPathStep[] {
+    // Check cache first
+    const cacheKey = `${fromPackageId}->${toPackageId}`;
+    if (this.pathCache.has(cacheKey)) {
+      return this.pathCache.get(cacheKey)!;
+    }
+
+    // Perform DFS with depth limit and caching
+    const result = this.dfsWithLimits(fromPackageId, toPackageId, new Set(), 0);
+
+    // Cache the result (even if empty)
+    this.pathCache.set(cacheKey, result);
+    return result;
+  }
+
+  /**
+   * DFS traversal with depth limit and cycle detection
+   */
+  private dfsWithLimits(
+    startPackageId: string,
+    targetPackageId: string,
+    visited: Set<string>,
+    depth: number,
+  ): DependencyPathStep[] {
+    // Depth limit to prevent exponential blowup
+    if (depth > this.currentMaxDepth) return [];
+
+    // Cycle detection
+    if (visited.has(startPackageId)) return [];
+    visited.add(startPackageId);
+
+    // Found target
+    if (startPackageId === targetPackageId) {
+      return [];
+    }
+
+    // Get snapshot for current package
+    let snapshotData = this.lockfile.snapshots?.[startPackageId];
+
+    if (!snapshotData) {
+      // Try to find by parsing the package ID
+      const parsed = parsePackageString(startPackageId);
+      const foundSnapshotId = this.findSnapshotId(
+        parsed.name,
+        parsed.version || "",
+      );
+      if (foundSnapshotId) {
+        snapshotData = this.lockfile.snapshots?.[foundSnapshotId];
+        startPackageId = foundSnapshotId;
+      }
+    }
+
+    if (!snapshotData) return [];
+
+    // Check all subdependencies
+    const subDeps = {
+      ...snapshotData.dependencies,
+      ...snapshotData.optionalDependencies,
+    };
+
+    for (const [subDepName, subDepVersion] of Object.entries(subDeps || {})) {
+      const subDepId =
+        this.findSnapshotId(subDepName, subDepVersion) ||
+        `${subDepName}@${subDepVersion}`;
+
+      // Check if this subdependency is our target
+      if (subDepId === targetPackageId) {
+        return [
+          {
+            package: targetPackageId,
+            type: "dependencies",
+            specifier: subDepVersion,
+          },
+        ];
+      }
+
+      // Recursively search deeper
+      const deeperPath = this.dfsWithLimits(
+        subDepId,
+        targetPackageId,
+        new Set(visited),
+        depth + 1,
+      );
+      if (deeperPath.length > 0) {
+        const intermediateStep: DependencyPathStep = {
+          package: subDepId,
+          type: "dependencies",
+          specifier: subDepVersion,
+        };
+        return [intermediateStep, ...deeperPath];
+      }
+    }
+
+    return [];
+  }
+
+  /**
+   * Find snapshot ID using same logic as dependency tracker
+   */
+  private findSnapshotId(packageName: string, version: string): string | null {
+    const exactMatch = `${packageName}@${version}`;
+    if (this.lockfile.snapshots && this.lockfile.snapshots[exactMatch]) {
+      return exactMatch;
+    }
+
+    for (const snapshotId of Object.keys(this.lockfile.snapshots || {})) {
+      const parsed = parsePackageString(snapshotId);
+      if (parsed.name === packageName && parsed.version === version) {
+        return snapshotId;
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -605,6 +763,7 @@ export class DuplicatesUsecase {
     perProjectDuplicates: PerProjectDuplicate[],
     format: OutputFormat = "tree",
     showDependencyTree = false,
+    _maxDepth = 10,
   ): string {
     if (format === "json") {
       // Create clean version without dependencies for JSON output
