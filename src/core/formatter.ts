@@ -361,17 +361,25 @@ export function formatDuplicates(
 }
 
 /**
- * Convert dependency type to short notation
+ * Convert dependency type to short notation with combination support
+ * Examples: od (optional+dependencies), op (optional+peer), oD (optional+dev)
  */
-function getTypeShortCode(type: string): string {
-  const typeMapping: Record<string, string> = {
+function getTypeShortCode(type: string, isOptional = false): string {
+  const baseTypeMapping: Record<string, string> = {
     dependencies: "d",
     devDependencies: "D",
     optionalDependencies: "o",
     peerDependencies: "p",
     transitive: "t",
   };
-  return typeMapping[type] || type;
+
+  // Handle optional combinations
+  if (isOptional && type !== "optionalDependencies") {
+    const baseCode = baseTypeMapping[type] || type;
+    return `o${baseCode}`; // op, oD, od, etc.
+  }
+
+  return baseTypeMapping[type] || type;
 }
 
 /**
