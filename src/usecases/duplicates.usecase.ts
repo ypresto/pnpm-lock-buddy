@@ -133,6 +133,42 @@ export class DuplicatesUsecase {
       }
     });
 
+    // Also collect link: entries from importers section as separate instances
+    traverseLockfile(this.lockfile, (context) => {
+      const { key, value, path } = context;
+
+      if (path[0] === "importers" && path.length === 4 && path[1]) {
+        const importerPath = path[1];
+        const packageName = key;
+        const depInfo = value as { specifier: string; version: string };
+
+        // Check if this is a link dependency
+        if (depInfo.version.startsWith("link:")) {
+          const linkInstanceId = `${packageName}@${depInfo.version}`;
+          const parsed = parsePackageString(linkInstanceId);
+
+          if (parsed.name) {
+            // Create synthetic instance for the link entry
+            const linkInstance: PackageInstance = {
+              id: linkInstanceId,
+              packageName: parsed.name,
+              version: parsed.version || depInfo.version,
+              dependencies: {}, // Link entries don't have their own dependencies
+              projects: new Set([importerPath]),
+            };
+
+            instancesMap.set(linkInstanceId, linkInstance);
+
+            // Group by package name
+            if (!packageGroups.has(parsed.name)) {
+              packageGroups.set(parsed.name, []);
+            }
+            packageGroups.get(parsed.name)!.push(linkInstanceId);
+          }
+        }
+      }
+    });
+
     // Now find where each instance is used
     traverseLockfile(this.lockfile, (context) => {
       const { key, value, path } = context;

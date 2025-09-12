@@ -121,6 +121,14 @@ export class DependencyTracker {
               resolvedImporter: resolvedImporter,
             });
 
+            // Add both the original link format and resolved format to the deps set
+            const originalLinkId = `${depName}@${depInfo.version}`; // @layerone/bakuraku-fetch@link:../../packages/webapp/bakuraku-fetch
+            deps.add(originalLinkId);
+
+            // Also add a simplified link format for easier matching
+            const simpleLinkId = `${depName}@link:${resolvedImporter}`;
+            deps.add(simpleLinkId);
+
             // Add all dependencies from the linked importer
             const linkedImporterData =
               this.lockfile.importers[resolvedImporter];
