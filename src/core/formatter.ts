@@ -297,6 +297,7 @@ export interface DuplicateInstance {
     dependencies: Record<string, string>;
     projects: string[];
     dependencyType?: string;
+    dependencyInfo?: DependencyInfo;
   }>;
 }
 
@@ -328,6 +329,7 @@ export interface PerProjectDuplicate {
 export function formatDuplicates(
   duplicates: DuplicateInstance[],
   useColor = true,
+  showDependencyTree = false,
 ): string {
   if (duplicates.length === 0) {
     return "No duplicate packages found.";
@@ -346,13 +348,29 @@ export function formatDuplicates(
     );
 
     for (const instance of dup.instances) {
-      const typeInfo = instance.dependencyType
-        ? ` (${instance.dependencyType})`
-        : "";
-      lines.push(`  ${versionColor(instance.id)}${typeInfo}`);
+      if (showDependencyTree && instance.dependencyInfo) {
+        // Show dependency tree for each project (similar to per-project mode)
+        for (const project of instance.projects) {
+          lines.push(`  ${project}:`);
+          lines.push(
+            ...formatDependencyTree(
+              instance.dependencyInfo.path,
+              versionColor,
+              useColor,
+              "  ",
+            ),
+          );
+        }
+      } else {
+        // Traditional format
+        const typeInfo = instance.dependencyType
+          ? ` (${instance.dependencyType})`
+          : "";
+        lines.push(`  ${versionColor(instance.id)}${typeInfo}`);
 
-      if (instance.projects.length > 0) {
-        lines.push(`    Used by: ${instance.projects.join(", ")}`);
+        if (instance.projects.length > 0) {
+          lines.push(`    Used by: ${instance.projects.join(", ")}`);
+        }
       }
     }
   }
@@ -394,6 +412,7 @@ function formatDependencyTree(
   path: DependencyPathStep[],
   versionColor: (s: string) => string,
   _useColor: boolean,
+  basePrefix = "",
 ): string[] {
   if (path.length === 0) return [];
 
@@ -410,11 +429,12 @@ function formatDependencyTree(
     let prefix = "";
     if (i === 0) {
       // First step (after importer)
-      prefix = i === path.length - 1 ? "    └─" : "    ├─";
+      prefix =
+        i === path.length - 1 ? `${basePrefix}    └─` : `${basePrefix}    ├─`;
     } else {
       // Intermediate steps with increasing indentation
       const isLast = i === path.length - 1;
-      const parentSpacing = "    " + "│  ".repeat(i);
+      const parentSpacing = `${basePrefix}    ` + "│  ".repeat(i);
       prefix = isLast ? `${parentSpacing}└─` : `${parentSpacing}├─`;
     }
 

@@ -187,6 +187,20 @@ export class DuplicatesUsecase {
             );
           }
 
+          // Generate dependency info for first project if requested
+          let dependencyInfo = undefined;
+          if (allImporters.length > 0) {
+            // Use first project as representative for dependency path
+            const firstProject = allImporters[0];
+            if (firstProject) {
+              dependencyInfo = this.getInstanceDependencyInfo(
+                firstProject,
+                packageName,
+                instance.id,
+              );
+            }
+          }
+
           return {
             id: instance.id,
             version: instance.version,
@@ -196,6 +210,7 @@ export class DuplicatesUsecase {
                 ? allImporters
                 : Array.from(instance.projects),
             dependencyType: this.getDependencyType(packageName, allImporters),
+            dependencyInfo,
           };
         });
 
@@ -851,6 +866,7 @@ export class DuplicatesUsecase {
   formatResults(
     duplicates: DuplicateInstance[],
     format: OutputFormat = "tree",
+    showDependencyTree = false,
   ): string {
     if (format === "json") {
       // Create clean version without dependencies for JSON output
@@ -866,6 +882,6 @@ export class DuplicatesUsecase {
       return JSON.stringify(cleanDuplicates, null, 2);
     }
 
-    return formatDuplicates(duplicates);
+    return formatDuplicates(duplicates, true, showDependencyTree);
   }
 }

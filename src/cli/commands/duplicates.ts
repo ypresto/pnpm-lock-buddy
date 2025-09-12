@@ -181,6 +181,7 @@ export function createDuplicatesCommand(): Command {
             const output = duplicatesUsecase.formatResults(
               duplicates,
               options.output as OutputFormat,
+              options.deps,
             );
 
             console.log(output);
