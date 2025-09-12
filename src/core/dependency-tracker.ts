@@ -6,6 +6,12 @@ export interface DependencyInfo {
   directDependents: Set<string>; // Packages that directly depend on this package
 }
 
+export interface DependencyPathStep {
+  package: string;
+  type: string;
+  specifier: string;
+}
+
 export interface LinkedDependencyInfo {
   sourceImporter: string; // 'apps/web'
   linkName: string; // '@my/logger'
@@ -22,6 +28,7 @@ export class DependencyTracker {
   private importerDependencies = new Map<string, Set<string>>(); // importer -> direct deps
   private importerCache = new Map<string, string[]>(); // packageId -> importers (cached)
   private linkedDependencies = new Map<string, LinkedDependencyInfo[]>(); // importer -> linked deps
+  private dependencyPaths = new Map<string, DependencyPathStep[]>(); // Unified path cache
   private isInitialized = false;
 
   constructor(lockfile: PnpmLockfile) {
@@ -366,5 +373,133 @@ export class DependencyTracker {
     this.initialize();
 
     return this.linkedDependencies.get(importerPath) || [];
+  }
+
+  /**
+   * Get dependency path from importer to package (unified API)
+   */
+  getDependencyPath(
+    importerPath: string,
+    packageId: string,
+  ): DependencyPathStep[] {
+    this.initialize();
+
+    const cacheKey = `${importerPath}:${packageId}`;
+    if (this.dependencyPaths.has(cacheKey)) {
+      return this.dependencyPaths.get(cacheKey)!;
+    }
+
+    // Build path using unified logic
+    const path = this.buildUnifiedPath(importerPath, packageId);
+    this.dependencyPaths.set(cacheKey, path);
+    return path;
+  }
+
+  /**
+   * Build dependency path using unified linked + non-linked traversal
+   */
+  private buildUnifiedPath(
+    importerPath: string,
+    packageId: string,
+  ): DependencyPathStep[] {
+    const importerData = this.lockfile.importers[importerPath];
+    if (!importerData) return [];
+
+    const packageName = parsePackageString(packageId).name;
+
+    // 1. Check if it's a direct dependency
+    const directPath = this.checkDirectDependency(
+      importerData,
+      packageName,
+      packageId,
+    );
+    if (directPath) return directPath;
+
+    // 2. Check if it comes through linked dependencies
+    const linkedPath = this.checkLinkedDependencyPath(
+      importerPath,
+      packageName,
+      packageId,
+    );
+    if (linkedPath.length > 0) return linkedPath;
+
+    // 3. Fallback: just the target
+    return [{ package: packageId, type: "transitive", specifier: "unknown" }];
+  }
+
+  /**
+   * Check if package is a direct dependency
+   */
+  private checkDirectDependency(
+    importerData: any,
+    packageName: string,
+    packageId: string,
+  ): DependencyPathStep[] | null {
+    const depTypes = [
+      { deps: importerData.dependencies, type: "dependencies" },
+      { deps: importerData.devDependencies, type: "devDependencies" },
+      { deps: importerData.optionalDependencies, type: "optionalDependencies" },
+      { deps: importerData.peerDependencies, type: "peerDependencies" },
+    ];
+
+    for (const { deps, type } of depTypes) {
+      if (deps?.[packageName]) {
+        const depInfo = deps[packageName];
+        const depVersion = depInfo.version;
+
+        // Check if this specific instance matches
+        if (
+          depVersion === packageId ||
+          packageId === `${packageName}@${depVersion}` ||
+          depVersion.startsWith(packageId + "(") ||
+          packageId.startsWith(`${packageName}@${depVersion}`)
+        ) {
+          return [
+            {
+              package: packageId,
+              type,
+              specifier: depInfo.specifier,
+            },
+          ];
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if package comes through linked dependencies
+   */
+  private checkLinkedDependencyPath(
+    importerPath: string,
+    packageName: string,
+    packageId: string,
+  ): DependencyPathStep[] {
+    const linkedDeps = this.getLinkedDependencies(importerPath);
+
+    for (const linkedDep of linkedDeps) {
+      // Check if target is direct dependency of linked package
+      const linkedImporterData =
+        this.lockfile.importers[linkedDep.resolvedImporter];
+      if (linkedImporterData) {
+        const linkedDirectPath = this.checkDirectDependency(
+          linkedImporterData,
+          packageName,
+          packageId,
+        );
+        if (linkedDirectPath) {
+          // Build path: link step + target step
+          const linkStep: DependencyPathStep = {
+            package: linkedDep.linkName,
+            type: "dependencies", // Most links are in dependencies
+            specifier: `link:${linkedDep.resolvedImporter}`,
+          };
+          return [linkStep, ...linkedDirectPath];
+        }
+      }
+    }
+
+    return [];
   }
 }
