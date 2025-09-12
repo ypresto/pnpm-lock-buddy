@@ -8,6 +8,7 @@ import {
   type DuplicateInstance,
 } from "../core/formatter.js";
 import { DependencyTracker } from "../core/dependency-tracker.js";
+import type { DependencyPathStep, DependencyInfo } from "../core/types.js";
 
 export interface DuplicatesOptions {
   showAll?: boolean;
@@ -32,17 +33,6 @@ export interface PerProjectDuplicate {
   duplicatePackages: ProjectPackageDuplicate[];
 }
 
-export interface DependencyPathStep {
-  package: string;
-  type: string;
-  specifier: string;
-}
-
-export interface DependencyInfo {
-  typeSummary: string;
-  path: DependencyPathStep[];
-}
-
 export interface ProjectPackageDuplicate {
   packageName: string;
   instances: Array<{
@@ -55,8 +45,6 @@ export interface ProjectPackageDuplicate {
 
 export class DuplicatesUsecase {
   private dependencyTracker: DependencyTracker;
-  private pathCache = new Map<string, DependencyPathStep[]>(); // Cache for expensive path calculations
-  private currentMaxDepth = 10; // Default max depth
 
   constructor(private lockfile: PnpmLockfile) {
     this.dependencyTracker = new DependencyTracker(lockfile);
@@ -283,8 +271,7 @@ export class DuplicatesUsecase {
   findPerProjectDuplicates(
     options: DuplicatesOptions = {},
   ): PerProjectDuplicate[] {
-    const { projectFilter, maxDepth = 10 } = options;
-    this.currentMaxDepth = maxDepth; // Set max depth for this operation
+    const { projectFilter } = options;
 
     // Get global duplicates first (with same filtering)
     const globalDuplicates = this.findDuplicates(options);
@@ -420,424 +407,24 @@ export class DuplicatesUsecase {
    */
   private getInstanceDependencyInfo(
     importerPath: string,
-    packageName: string,
+    _packageName: string,
     instanceId: string,
   ): DependencyInfo {
-    // Try to build dependency path
-    const path = this.buildDependencyPath(
+    const path = this.dependencyTracker.getDependencyPath(
       importerPath,
-      packageName,
       instanceId,
     );
 
-    if (path.length === 0) {
-      // Fallback if we can't determine the path
-      return {
-        typeSummary: "transitive",
-        path: [
-          { package: instanceId, type: "transitive", specifier: "unknown" },
-        ],
-      };
-    }
-
-    // Determine type summary based on priority
-    const typeSummary = this.getTypeSummaryFromPath(path);
+    const typeSummary =
+      path.length > 0 ? this.getTypeSummaryFromPath(path) : "transitive";
 
     return {
       typeSummary,
-      path,
+      path:
+        path.length > 0
+          ? path
+          : [{ package: instanceId, type: "transitive", specifier: "unknown" }],
     };
-  }
-
-  /**
-   * Build the full dependency path from importer to target package
-   */
-  private buildDependencyPath(
-    importerPath: string,
-    packageName: string,
-    instanceId: string,
-  ): DependencyPathStep[] {
-    const importerData = this.lockfile.importers[importerPath];
-    if (!importerData) return [];
-
-    // Check if it's a direct dependency first
-    const directPath = this.checkDirectDependency(
-      importerData,
-      packageName,
-      instanceId,
-    );
-    if (directPath) return directPath;
-
-    // Check if it comes through linked dependencies
-    const linkedPath = this.checkLinkedDependency(
-      importerPath,
-      packageName,
-      instanceId,
-    );
-    if (linkedPath.length > 0) return linkedPath;
-
-    // For transitive dependencies, we'll implement a simplified version for now
-    // A full implementation would require traversing the actual dependency graph
-    return this.buildTransitivePath(importerPath, packageName, instanceId);
-  }
-
-  /**
-   * Check if package is a direct dependency and build single-step path
-   */
-  private checkDirectDependency(
-    importerData: any,
-    packageName: string,
-    instanceId: string,
-  ): DependencyPathStep[] | null {
-    const depTypes = [
-      { deps: importerData.dependencies, type: "dependencies" },
-      { deps: importerData.optionalDependencies, type: "optionalDependencies" },
-      { deps: importerData.peerDependencies, type: "peerDependencies" },
-      { deps: importerData.devDependencies, type: "devDependencies" },
-    ];
-
-    for (const { deps, type } of depTypes) {
-      if (deps?.[packageName]) {
-        const depInfo = deps[packageName];
-        const depVersion = depInfo.version;
-
-        // Check if this specific instance matches
-        if (
-          depVersion === instanceId ||
-          instanceId === `${packageName}@${depVersion}` ||
-          depVersion.startsWith(instanceId + "(") ||
-          instanceId.startsWith(`${packageName}@${depVersion}`)
-        ) {
-          return [
-            {
-              package: instanceId,
-              type,
-              specifier: depInfo.specifier,
-            },
-          ];
-        }
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Check if package comes through linked dependencies and build path
-   */
-  private checkLinkedDependency(
-    importerPath: string,
-    packageName: string,
-    instanceId: string,
-  ): DependencyPathStep[] {
-    const linkedDeps =
-      this.dependencyTracker.getLinkedDependencies(importerPath);
-
-    for (const linkedDep of linkedDeps) {
-      const linkedImporterData =
-        this.lockfile.importers[linkedDep.resolvedImporter];
-      if (!linkedImporterData) continue;
-
-      // Check if the target package exists in the linked dependency
-      const linkedDirectPath = this.checkDirectDependency(
-        linkedImporterData,
-        packageName,
-        instanceId,
-      );
-      if (linkedDirectPath) {
-        // Build path: link step + target step
-        // Find the actual specifier for the link
-        const importerData = this.lockfile.importers[importerPath];
-        let linkSpecifier = `link:${linkedDep.resolvedImporter}`;
-        let linkType = "dependencies";
-
-        // Find the actual link in the importer data
-        const allDeps = {
-          ...importerData?.dependencies,
-          ...importerData?.devDependencies,
-          ...importerData?.optionalDependencies,
-          ...importerData?.peerDependencies,
-        };
-
-        if (allDeps?.[linkedDep.linkName]) {
-          const linkInfo = allDeps[linkedDep.linkName];
-          linkSpecifier = (linkInfo as any).specifier;
-
-          // Determine link type
-          if (importerData?.dependencies?.[linkedDep.linkName])
-            linkType = "dependencies";
-          else if (importerData?.devDependencies?.[linkedDep.linkName])
-            linkType = "devDependencies";
-          else if (importerData?.optionalDependencies?.[linkedDep.linkName])
-            linkType = "optionalDependencies";
-          else if (importerData?.peerDependencies?.[linkedDep.linkName])
-            linkType = "peerDependencies";
-        }
-
-        const linkStep: DependencyPathStep = {
-          package: linkedDep.linkName,
-          type: linkType,
-          specifier: linkSpecifier,
-        };
-
-        return [linkStep, ...linkedDirectPath];
-      }
-    }
-
-    return [];
-  }
-
-  /**
-   * Build transitive dependency path using cached DFS traversal
-   */
-  private buildTransitivePath(
-    importerPath: string,
-    _packageName: string,
-    instanceId: string,
-  ): DependencyPathStep[] {
-    const importerData = this.lockfile.importers[importerPath];
-    if (!importerData) return [];
-
-    // Get all direct dependencies of this importer
-    const allDirectDeps = [
-      ...Object.entries(importerData.dependencies || {}).map(
-        ([name, info]) => ({ name, info, type: "dependencies" }),
-      ),
-      ...Object.entries(importerData.devDependencies || {}).map(
-        ([name, info]) => ({ name, info, type: "devDependencies" }),
-      ),
-      ...Object.entries(importerData.optionalDependencies || {}).map(
-        ([name, info]) => ({ name, info, type: "optionalDependencies" }),
-      ),
-      ...Object.entries(importerData.peerDependencies || {}).map(
-        ([name, info]) => ({ name, info, type: "peerDependencies" }),
-      ),
-    ];
-
-    // Try to find actual dependency path for each direct dependency
-    for (const { name, info, type } of allDirectDeps) {
-      // Use proper snapshot ID construction
-      const directDepId = `${name}@${info.version}`;
-
-      // Quick filter: skip expensive DFS if package name doesn't suggest it could lead to target
-      if (this.couldContainTarget(name, instanceId)) {
-        // Use cached DFS to find path from this direct dependency to target
-        const path = this.findDependencyPathDFS(directDepId, instanceId);
-        if (path.length > 0) {
-          // Prepend the direct dependency step
-          const directStep: DependencyPathStep = {
-            package: directDepId,
-            type,
-            specifier: info.specifier,
-          };
-          return [directStep, ...path];
-        }
-      }
-    }
-
-    // Fallback: just the target package
-    return [{ package: instanceId, type: "transitive", specifier: "unknown" }];
-  }
-
-  /**
-   * Quick filter to avoid expensive DFS on packages unlikely to contain the target
-   */
-  private couldContainTarget(
-    packageName: string,
-    targetInstanceId: string,
-  ): boolean {
-    const targetPkgName = parsePackageString(targetInstanceId).name;
-
-    // If package name contains any part of the target name, it might contain it
-    if (
-      packageName.includes(targetPkgName) ||
-      targetPkgName.includes(packageName)
-    ) {
-      return true;
-    }
-
-    // Known patterns that often contain typescript-eslint
-    if (targetPkgName.includes("typescript-eslint")) {
-      return (
-        packageName.includes("eslint") ||
-        packageName.includes("typescript") ||
-        packageName.includes("@typescript-eslint")
-      );
-    }
-
-    // For other packages, be more conservative - only check closely related names
-    const targetParts = targetPkgName.split("/").pop()?.split("-") || [];
-    const packageParts = packageName.split("/").pop()?.split("-") || [];
-
-    return targetParts.some((part) => packageParts.includes(part));
-  }
-
-  /**
-   * Find dependency path using cached forward DFS
-   */
-  private findDependencyPathDFS(
-    fromPackageId: string,
-    toPackageId: string,
-  ): DependencyPathStep[] {
-    // Check cache first
-    const cacheKey = `${fromPackageId}->${toPackageId}`;
-    if (this.pathCache.has(cacheKey)) {
-      return this.pathCache.get(cacheKey)!;
-    }
-
-    // Perform DFS with depth limit and caching
-    const result = this.dfsWithLimits(fromPackageId, toPackageId, new Set(), 0);
-
-    // Cache the result (even if empty)
-    this.pathCache.set(cacheKey, result);
-    return result;
-  }
-
-  /**
-   * DFS traversal with depth limit and cycle detection
-   */
-  private dfsWithLimits(
-    startPackageId: string,
-    targetPackageId: string,
-    visited: Set<string>,
-    depth: number,
-  ): DependencyPathStep[] {
-    // Depth limit to prevent exponential blowup
-    if (depth > this.currentMaxDepth) return [];
-
-    // Cycle detection
-    if (visited.has(startPackageId)) return [];
-    visited.add(startPackageId);
-
-    // Found target
-    if (startPackageId === targetPackageId) {
-      return [];
-    }
-
-    // Get snapshot for current package
-    let snapshotData = this.lockfile.snapshots?.[startPackageId];
-
-    if (!snapshotData) {
-      // Try to find by parsing the package ID
-      const parsed = parsePackageString(startPackageId);
-      const foundSnapshotId = this.findSnapshotId(
-        parsed.name,
-        parsed.version || "",
-      );
-      if (foundSnapshotId) {
-        snapshotData = this.lockfile.snapshots?.[foundSnapshotId];
-        startPackageId = foundSnapshotId;
-      }
-    }
-
-    if (!snapshotData) return [];
-
-    // Check dependencies by type to preserve type information
-    const depTypes = [
-      { deps: snapshotData.dependencies, type: "dependencies" },
-      { deps: snapshotData.optionalDependencies, type: "optionalDependencies" },
-      { deps: snapshotData.peerDependencies, type: "peerDependencies" },
-      { deps: snapshotData.devDependencies, type: "devDependencies" },
-    ];
-
-    for (const { deps, type } of depTypes) {
-      for (const [subDepName, subDepVersion] of Object.entries(deps || {})) {
-        const subDepVersionStr = subDepVersion as string;
-        const subDepId =
-          this.findSnapshotId(subDepName, subDepVersionStr) ||
-          `${subDepName}@${subDepVersionStr}`;
-
-        // Check if this subdependency is our target
-        if (subDepId === targetPackageId) {
-          // Check if this dependency is actually a peer dependency in the package definition
-          const actualType = this.getActualDependencyType(
-            startPackageId,
-            subDepName,
-            type as string,
-          );
-          return [
-            {
-              package: targetPackageId,
-              type: actualType,
-              specifier: subDepVersionStr,
-            },
-          ];
-        }
-
-        // Recursively search deeper
-        const deeperPath = this.dfsWithLimits(
-          subDepId,
-          targetPackageId,
-          new Set(visited),
-          depth + 1,
-        );
-        if (deeperPath.length > 0) {
-          // Check actual dependency type for intermediate step too
-          const actualType = this.getActualDependencyType(
-            startPackageId,
-            subDepName,
-            type as string,
-          );
-          const intermediateStep: DependencyPathStep = {
-            package: subDepId,
-            type: actualType,
-            specifier: subDepVersionStr,
-          };
-          return [intermediateStep, ...deeperPath];
-        }
-      }
-    }
-
-    return [];
-  }
-
-  /**
-   * Get the actual dependency type by checking package definition for peer dependencies
-   */
-  private getActualDependencyType(
-    packageId: string,
-    depName: string,
-    snapshotType: string,
-  ): string {
-    // Get the base package ID without peer dependency context
-    const basePkgId = packageId.split("(")[0];
-
-    // Check package definition for peer dependencies
-    if (this.lockfile.packages && basePkgId) {
-      const basePkg = this.lockfile.packages[basePkgId];
-      if (basePkg?.peerDependencies?.[depName]) {
-        // This is actually a peer dependency, even though snapshot shows it as regular
-        return "peerDependencies";
-      }
-
-      // Also check packages with full peer context
-      const fullPkg = this.lockfile.packages[packageId];
-      if (fullPkg?.peerDependencies?.[depName]) {
-        return "peerDependencies";
-      }
-    }
-
-    // Fall back to snapshot type
-    return snapshotType;
-  }
-
-  /**
-   * Find snapshot ID using same logic as dependency tracker
-   */
-  private findSnapshotId(packageName: string, version: string): string | null {
-    const exactMatch = `${packageName}@${version}`;
-    if (this.lockfile.snapshots && this.lockfile.snapshots[exactMatch]) {
-      return exactMatch;
-    }
-
-    for (const snapshotId of Object.keys(this.lockfile.snapshots || {})) {
-      const parsed = parsePackageString(snapshotId);
-      if (parsed.name === packageName && parsed.version === version) {
-        return snapshotId;
-      }
-    }
-
-    return null;
   }
 
   /**

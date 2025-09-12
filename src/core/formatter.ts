@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import type { DependencyPathStep, DependencyInfo } from "./types.js";
 
 export interface FormattedResult {
   packageName: string;
@@ -299,17 +300,6 @@ export interface DuplicateInstance {
     dependencyType?: string;
     dependencyInfo?: DependencyInfo;
   }>;
-}
-
-export interface DependencyPathStep {
-  package: string;
-  type: string;
-  specifier: string;
-}
-
-export interface DependencyInfo {
-  typeSummary: string;
-  path: DependencyPathStep[];
 }
 
 export interface PerProjectDuplicate {

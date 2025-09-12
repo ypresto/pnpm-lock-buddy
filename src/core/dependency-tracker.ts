@@ -1,22 +1,10 @@
 import type { PnpmLockfile } from "./lockfile.js";
 import { parsePackageString } from "./parser.js";
-
-export interface DependencyInfo {
-  importers: Set<string>;
-  directDependents: Set<string>; // Packages that directly depend on this package
-}
-
-export interface DependencyPathStep {
-  package: string;
-  type: string;
-  specifier: string;
-}
-
-export interface LinkedDependencyInfo {
-  sourceImporter: string; // 'apps/web'
-  linkName: string; // '@my/logger'
-  resolvedImporter: string; // 'packages/logger'
-}
+import type {
+  DependencyPathStep,
+  LinkedDependencyInfo,
+  PackageDependencyInfo,
+} from "./types.js";
 
 /**
  * Tracks transitive dependencies and provides lookup functionality
@@ -24,7 +12,7 @@ export interface LinkedDependencyInfo {
  */
 export class DependencyTracker {
   private lockfile: PnpmLockfile;
-  private dependencyMap = new Map<string, DependencyInfo>();
+  private dependencyMap = new Map<string, PackageDependencyInfo>();
   private importerDependencies = new Map<string, Set<string>>(); // importer -> direct deps
   private importerCache = new Map<string, string[]>(); // packageId -> importers (cached)
   private linkedDependencies = new Map<string, LinkedDependencyInfo[]>(); // importer -> linked deps
