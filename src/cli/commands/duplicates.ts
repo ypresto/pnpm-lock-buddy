@@ -30,6 +30,14 @@ export function createDuplicatesCommand(): Command {
     )
     .option("--deps", "Show dependency tree paths from root to target packages")
     .option(
+      "--compact-tree",
+      "Show compact dependency tree with '...' for middle sections when tree is deep",
+    )
+    .option(
+      "--number-versions",
+      "Assign reference numbers to package versions for easier identification",
+    )
+    .option(
       "--max-depth <number>",
       "Maximum depth for dependency path traversal (default: 10)",
       "10",
@@ -121,6 +129,8 @@ export function createDuplicatesCommand(): Command {
               options.output as OutputFormat,
               options.deps,
               parseInt(options.maxDepth),
+              options.compactTree,
+              options.numberVersions,
             );
 
             console.log(output);
@@ -172,6 +182,8 @@ export function createDuplicatesCommand(): Command {
               duplicates,
               options.output as OutputFormat,
               options.deps,
+              options.compactTree,
+              options.numberVersions,
             );
 
             console.log(output);

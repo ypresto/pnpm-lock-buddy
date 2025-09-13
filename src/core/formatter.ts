@@ -320,17 +320,34 @@ export function formatDuplicates(
   duplicates: DuplicateInstance[],
   useColor = true,
   showDependencyTree = false,
+  compactTree = false,
+  numberVersions = false,
 ): string {
   if (duplicates.length === 0) {
     return "No duplicate packages found.";
   }
 
   const lines: string[] = [];
+  const versionMap = new Map<string, number>();
+  let versionCounter = 1;
+
+  // Build version mapping if numberVersions is enabled
+  if (numberVersions) {
+    for (const dup of duplicates) {
+      for (const instance of dup.instances) {
+        const versionKey = `${dup.packageName}@${instance.version}`;
+        if (!versionMap.has(versionKey)) {
+          versionMap.set(versionKey, versionCounter++);
+        }
+      }
+    }
+  }
 
   // Color functions
   const packageColor = useColor ? chalk.cyan : (s: string) => s;
   const versionColor = useColor ? chalk.green : (s: string) => s;
   const countColor = useColor ? chalk.red : (s: string) => s;
+  const numberColor = useColor ? chalk.yellow : (s: string) => s;
 
   for (const dup of duplicates) {
     lines.push(
@@ -349,6 +366,9 @@ export function formatDuplicates(
               useColor,
               "  ",
               instance.dependencyInfo.allPaths,
+              compactTree,
+              numberVersions ? versionMap : undefined,
+              dup.packageName,
             ),
           );
         }
@@ -357,7 +377,15 @@ export function formatDuplicates(
         const typeInfo = instance.dependencyType
           ? ` (${instance.dependencyType})`
           : "";
-        lines.push(`  ${versionColor(instance.id)}${typeInfo}`);
+        
+        let displayVersion = versionColor(instance.id);
+        if (numberVersions) {
+          const versionKey = `${dup.packageName}@${instance.version}`;
+          const versionNum = versionMap.get(versionKey);
+          displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
+        }
+        
+        lines.push(`  ${displayVersion}${typeInfo}`);
 
         if (instance.projects.length > 0) {
           lines.push(`    Used by: ${instance.projects.join(", ")}`);
@@ -464,6 +492,10 @@ function formatTreeNode(
   versionColor: (s: string) => string,
   basePrefix: string,
   isLast = true,
+  compactTree = false,
+  versionMap?: Map<string, number>,
+  targetPackageName?: string,
+  numberColor?: (s: string) => string,
 ): string[] {
   const lines: string[] = [];
   
@@ -481,7 +513,18 @@ function formatTreeNode(
     // Only show type label if there's a type code
     const typeLabel = typeCode ? `(${typeCode})` : "";
     // Only colorize the target package
-    const packageName = node.isTarget ? versionColor(node.package) : node.package;
+    let packageName = node.isTarget ? versionColor(node.package) : node.package;
+    
+    // Add version number if enabled and this is the target package
+    if (versionMap && node.isTarget && targetPackageName && numberColor) {
+      // Find the version number for this target package from the version map
+      for (const [versionKey, versionNum] of versionMap.entries()) {
+        if (versionKey.startsWith(`${targetPackageName}@`)) {
+          packageName = `${packageName} ${numberColor(`[${versionNum}]`)}`;
+          break;
+        }
+      }
+    }
 
     const separator = typeLabel ? "─ " : "── ";
     const connector = isLast ? "└─" : "├─";
@@ -491,14 +534,34 @@ function formatTreeNode(
   const children = Array.from(node.children.values());
   const nextPrefix = node.package === "" ? basePrefix : (isLast ? `${basePrefix}   ` : `${basePrefix}│  `);
   
+  // Handle compact tree for deep hierarchies
+  const shouldCompact = compactTree && children.length > 0 && node.package !== "";
+  
   for (let i = 0; i < children.length; i++) {
     const child = children[i];
     if (!child) continue;
     
+    // Skip middle children if compact tree is enabled and we have many children
+    if (shouldCompact && children.length > 3 && i > 0 && i < children.length - 1) {
+      if (i === 1) {
+        lines.push(`${nextPrefix}│  ...`);
+      }
+      continue;
+    }
+    
     const childIsLast = i === children.length - 1;
     const childPrefix = node.package === "" ? `${nextPrefix}    ` : nextPrefix;
     
-    lines.push(...formatTreeNode(child, versionColor, childPrefix, childIsLast));
+    lines.push(...formatTreeNode(
+      child, 
+      versionColor, 
+      childPrefix, 
+      childIsLast, 
+      compactTree, 
+      versionMap, 
+      targetPackageName, 
+      numberColor
+    ));
   }
 
   return lines;
@@ -510,20 +573,34 @@ function formatDependencyTree(
   _useColor: boolean,
   basePrefix = "",
   allPaths?: DependencyPathStep[][],
+  compactTree = false,
+  versionMap?: Map<string, number>,
+  targetPackageName?: string,
 ): string[] {
   if (path.length === 0) return [];
 
   const lines: string[] = [];
+  const numberColor = _useColor ? chalk.yellow : (s: string) => s;
 
   // If we have multiple paths (diamond dependency), build a unified tree
   if (allPaths && allPaths.length > 1) {
     const tree = buildUnifiedTree(allPaths);
-    return formatTreeNode(tree, versionColor, basePrefix);
+    return formatTreeNode(tree, versionColor, basePrefix, true, compactTree, versionMap, targetPackageName, numberColor);
   } else {
-    // Original single path logic
+    // Original single path logic with compact tree support
+    const shouldCompact = compactTree && path.length > 4;
+    
     for (let i = 0; i < path.length; i++) {
       const step = path[i];
       if (!step) continue;
+
+      // Skip middle sections if compact tree is enabled
+      if (shouldCompact && i > 1 && i < path.length - 2) {
+        if (i === 2) {
+          lines.push(`${basePrefix}    │  ...`);
+        }
+        continue;
+      }
 
       const isLinked = step.specifier.startsWith("link:");
       let typeCode = "";
@@ -551,7 +628,18 @@ function formatDependencyTree(
       const typeLabel = typeCode ? `(${typeCode})` : "";
       // Only colorize the final leaf package (target)
       const isLeaf = i === path.length - 1;
-      const packageName = isLeaf ? versionColor(step.package) : step.package;
+      let packageName = isLeaf ? versionColor(step.package) : step.package;
+      
+      // Add version number if enabled and this is the target package
+      if (versionMap && isLeaf && targetPackageName) {
+        // Find the version number for this target package from the version map
+        for (const [versionKey, versionNum] of versionMap.entries()) {
+          if (versionKey.startsWith(`${targetPackageName}@`)) {
+            packageName = `${packageName} ${numberColor(`[${versionNum}]`)}`;
+            break;
+          }
+        }
+      }
 
       const separator = typeLabel ? "─ " : "── ";
       lines.push(`${prefix}${typeLabel}${separator}${packageName}`);
@@ -565,18 +653,37 @@ export function formatPerProjectDuplicates(
   perProjectDuplicates: PerProjectDuplicate[],
   useColor = true,
   showDependencyTree = false,
+  compactTree = false,
+  numberVersions = false,
 ): string {
   if (perProjectDuplicates.length === 0) {
     return "No per-project duplicate packages found.";
   }
 
   const lines: string[] = [];
+  const versionMap = new Map<string, number>();
+  let versionCounter = 1;
+
+  // Build version mapping if numberVersions is enabled
+  if (numberVersions) {
+    for (const project of perProjectDuplicates) {
+      for (const pkg of project.duplicatePackages) {
+        for (const instance of pkg.instances) {
+          const versionKey = `${pkg.packageName}@${instance.version}`;
+          if (!versionMap.has(versionKey)) {
+            versionMap.set(versionKey, versionCounter++);
+          }
+        }
+      }
+    }
+  }
 
   // Color functions
   const packageColor = useColor ? chalk.cyan : (s: string) => s;
   const projectColor = useColor ? chalk.blue : (s: string) => s;
   const versionColor = useColor ? chalk.green : (s: string) => s;
   const countColor = useColor ? chalk.red : (s: string) => s;
+  const numberColor = useColor ? chalk.yellow : (s: string) => s;
 
   // Group by package name first
   const packageGroups = new Map<
@@ -624,13 +731,28 @@ export function formatPerProjectDuplicates(
                 useColor,
                 "",
                 instance.dependencyInfo.allPaths,
+                compactTree,
+                numberVersions ? versionMap : undefined,
+                packageName,
               ),
             );
           } else {
-            lines.push(`    ${versionColor(instance.id)}`);
+            let displayVersion = versionColor(instance.id);
+            if (numberVersions) {
+              const versionKey = `${packageName}@${instance.version}`;
+              const versionNum = versionMap.get(versionKey);
+              displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
+            }
+            lines.push(`    ${displayVersion}`);
           }
         } else {
-          lines.push(`    ${versionColor(instance.id)}`);
+          let displayVersion = versionColor(instance.id);
+          if (numberVersions) {
+            const versionKey = `${packageName}@${instance.version}`;
+            const versionNum = versionMap.get(versionKey);
+            displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
+          }
+          lines.push(`    ${displayVersion}`);
         }
       }
     }
