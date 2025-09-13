@@ -374,21 +374,22 @@ export function formatDuplicates(
  */
 function getTypeShortCode(type: string, isOptional = false): string {
   const baseTypeMapping: Record<string, string> = {
-    dependencies: "d",
-    devDependencies: "D",
-    optionalDependencies: "o",
-    peerDependencies: "p",
-    transitive: "t",
-    file: "F",
+    dependencies: "", // normal dependencies show no indicator
+    devDependencies: "dev",
+    optionalDependencies: "optional",
+    peerDependencies: "peer",
+    transitive: "", // transitive also shows no indicator by default
+    file: "file:",
   };
 
   // Handle optional combinations
   if (isOptional && type !== "optionalDependencies") {
-    const baseCode = baseTypeMapping[type] || type;
-    return `o${baseCode}`; // op, oD, od, etc.
+    const baseCode = baseTypeMapping[type] || "";
+    const parts = [baseCode, "optional"].filter(Boolean);
+    return parts.join(",");
   }
 
-  return baseTypeMapping[type] || type;
+  return baseTypeMapping[type] || "";
 }
 
 /**
@@ -414,7 +415,13 @@ function formatDependencyTree(
     if (!step) continue;
 
     const isLinked = step.specifier.startsWith("link:");
-    const typeCode = isLinked ? "L" : getTypeShortCode(step.type);
+    let typeCode = "";
+    
+    if (isLinked) {
+      typeCode = "link:";
+    } else {
+      typeCode = getTypeShortCode(step.type);
+    }
 
     // Determine tree characters based on position with proper depth indentation
     let prefix = "";
@@ -429,12 +436,14 @@ function formatDependencyTree(
       prefix = isLast ? `${parentSpacing}└─` : `${parentSpacing}├─`;
     }
 
-    const typeLabel = `(${typeCode})`;
+    // Only show type label if there's a type code
+    const typeLabel = typeCode ? `(${typeCode})` : "";
     // Only colorize the final leaf package (target)
     const isLeaf = i === path.length - 1;
     const packageName = isLeaf ? versionColor(step.package) : step.package;
 
-    lines.push(`${prefix}${typeLabel}─ ${packageName}`);
+    const separator = typeLabel ? "─ " : "── ";
+    lines.push(`${prefix}${typeLabel}${separator}${packageName}`);
   }
 
   return lines;
