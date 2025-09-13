@@ -28,14 +28,9 @@ export function createDuplicatesCommand(): Command {
       "--omit <types...>",
       'Omit dependency types: "dev", "optional", "peer" (e.g., --omit=dev --omit=optional)',
     )
-    .option("--deps", "Show dependency tree paths from root to target packages")
     .option(
-      "--compact-tree",
-      "Show compact dependency tree with '...' for middle sections when tree is deep",
-    )
-    .option(
-      "--number-versions",
-      "Assign reference numbers to package versions for easier identification",
+      "--deps [depth]",
+      "Show dependency tree paths from root to target packages. Optional depth number limits tree display (e.g., --deps=3 shows max 3 levels with '...' for deeper paths)",
     )
     .option(
       "--max-depth <number>",
@@ -49,6 +44,21 @@ export function createDuplicatesCommand(): Command {
     .option("-o, --output <format>", "Output format: tree, json", "tree")
     .action((packageNames: string[], options) => {
       try {
+        // Parse deps option
+        let showDependencyTree = false;
+        let compactTreeDepth: number | undefined = undefined;
+        
+        if (options.deps !== undefined) {
+          showDependencyTree = true;
+          
+          // Handle --deps=n format
+          if (typeof options.deps === "string" && options.deps !== "" && !isNaN(Number(options.deps))) {
+            compactTreeDepth = Number(options.deps);
+          } else if (typeof options.deps === "number") {
+            compactTreeDepth = options.deps;
+          }
+        }
+
         // Load lockfile
         const lockfile = loadLockfile(options.file);
 
@@ -127,10 +137,9 @@ export function createDuplicatesCommand(): Command {
             const output = duplicatesUsecase.formatPerProjectResults(
               perProjectDuplicates,
               options.output as OutputFormat,
-              options.deps,
+              showDependencyTree,
               parseInt(options.maxDepth),
-              options.compactTree,
-              options.numberVersions,
+              compactTreeDepth,
             );
 
             console.log(output);
@@ -181,9 +190,8 @@ export function createDuplicatesCommand(): Command {
             const output = duplicatesUsecase.formatResults(
               duplicates,
               options.output as OutputFormat,
-              options.deps,
-              options.compactTree,
-              options.numberVersions,
+              showDependencyTree,
+              compactTreeDepth,
             );
 
             console.log(output);

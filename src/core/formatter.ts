@@ -320,8 +320,7 @@ export function formatDuplicates(
   duplicates: DuplicateInstance[],
   useColor = true,
   showDependencyTree = false,
-  compactTree = false,
-  numberVersions = false,
+  compactTreeDepth?: number,
 ): string {
   if (duplicates.length === 0) {
     return "No duplicate packages found.";
@@ -331,14 +330,12 @@ export function formatDuplicates(
   const versionMap = new Map<string, number>();
   let versionCounter = 1;
 
-  // Build version mapping if numberVersions is enabled
-  if (numberVersions) {
-    for (const dup of duplicates) {
-      for (const instance of dup.instances) {
-        const versionKey = `${dup.packageName}@${instance.version}`;
-        if (!versionMap.has(versionKey)) {
-          versionMap.set(versionKey, versionCounter++);
-        }
+  // Always build version mapping (version numbering always enabled)
+  for (const dup of duplicates) {
+    for (const instance of dup.instances) {
+      const versionKey = `${dup.packageName}@${instance.version}`;
+      if (!versionMap.has(versionKey)) {
+        versionMap.set(versionKey, versionCounter++);
       }
     }
   }
@@ -366,24 +363,21 @@ export function formatDuplicates(
               useColor,
               "  ",
               instance.dependencyInfo.allPaths,
-              compactTree,
-              numberVersions ? versionMap : undefined,
+              compactTreeDepth,
+              versionMap,
               dup.packageName,
             ),
           );
         }
       } else {
-        // Traditional format
+        // Traditional format with version numbering always enabled
         const typeInfo = instance.dependencyType
           ? ` (${instance.dependencyType})`
           : "";
         
-        let displayVersion = versionColor(instance.id);
-        if (numberVersions) {
-          const versionKey = `${dup.packageName}@${instance.version}`;
-          const versionNum = versionMap.get(versionKey);
-          displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
-        }
+        const versionKey = `${dup.packageName}@${instance.version}`;
+        const versionNum = versionMap.get(versionKey);
+        const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
         
         lines.push(`  ${displayVersion}${typeInfo}`);
 
@@ -492,7 +486,7 @@ function formatTreeNode(
   versionColor: (s: string) => string,
   basePrefix: string,
   isLast = true,
-  compactTree = false,
+  compactTreeDepth?: number,
   versionMap?: Map<string, number>,
   targetPackageName?: string,
   numberColor?: (s: string) => string,
@@ -515,7 +509,7 @@ function formatTreeNode(
     // Only colorize the target package
     let packageName = node.isTarget ? versionColor(node.package) : node.package;
     
-    // Add version number if enabled and this is the target package
+    // Add version number if this is the target package (always enabled)
     if (versionMap && node.isTarget && targetPackageName && numberColor) {
       // Find the version number for this target package from the version map
       for (const [versionKey, versionNum] of versionMap.entries()) {
@@ -535,14 +529,14 @@ function formatTreeNode(
   const nextPrefix = node.package === "" ? basePrefix : (isLast ? `${basePrefix}   ` : `${basePrefix}│  `);
   
   // Handle compact tree for deep hierarchies
-  const shouldCompact = compactTree && children.length > 0 && node.package !== "";
+  const shouldCompact = compactTreeDepth !== undefined && children.length > compactTreeDepth && node.package !== "";
   
   for (let i = 0; i < children.length; i++) {
     const child = children[i];
     if (!child) continue;
     
     // Skip middle children if compact tree is enabled and we have many children
-    if (shouldCompact && children.length > 3 && i > 0 && i < children.length - 1) {
+    if (shouldCompact && children.length > compactTreeDepth && i > 0 && i < children.length - 1) {
       if (i === 1) {
         lines.push(`${nextPrefix}│  ...`);
       }
@@ -557,7 +551,7 @@ function formatTreeNode(
       versionColor, 
       childPrefix, 
       childIsLast, 
-      compactTree, 
+      compactTreeDepth, 
       versionMap, 
       targetPackageName, 
       numberColor
@@ -573,7 +567,7 @@ function formatDependencyTree(
   _useColor: boolean,
   basePrefix = "",
   allPaths?: DependencyPathStep[][],
-  compactTree = false,
+  compactTreeDepth?: number,
   versionMap?: Map<string, number>,
   targetPackageName?: string,
 ): string[] {
@@ -585,10 +579,10 @@ function formatDependencyTree(
   // If we have multiple paths (diamond dependency), build a unified tree
   if (allPaths && allPaths.length > 1) {
     const tree = buildUnifiedTree(allPaths);
-    return formatTreeNode(tree, versionColor, basePrefix, true, compactTree, versionMap, targetPackageName, numberColor);
+    return formatTreeNode(tree, versionColor, basePrefix, true, compactTreeDepth, versionMap, targetPackageName, numberColor);
   } else {
     // Original single path logic with compact tree support
-    const shouldCompact = compactTree && path.length > 4;
+    const shouldCompact = compactTreeDepth !== undefined && path.length > compactTreeDepth;
     
     for (let i = 0; i < path.length; i++) {
       const step = path[i];
@@ -630,7 +624,7 @@ function formatDependencyTree(
       const isLeaf = i === path.length - 1;
       let packageName = isLeaf ? versionColor(step.package) : step.package;
       
-      // Add version number if enabled and this is the target package
+      // Add version number if this is the target package (always enabled)
       if (versionMap && isLeaf && targetPackageName) {
         // Find the version number for this target package from the version map
         for (const [versionKey, versionNum] of versionMap.entries()) {
@@ -653,8 +647,7 @@ export function formatPerProjectDuplicates(
   perProjectDuplicates: PerProjectDuplicate[],
   useColor = true,
   showDependencyTree = false,
-  compactTree = false,
-  numberVersions = false,
+  compactTreeDepth?: number,
 ): string {
   if (perProjectDuplicates.length === 0) {
     return "No per-project duplicate packages found.";
@@ -664,15 +657,13 @@ export function formatPerProjectDuplicates(
   const versionMap = new Map<string, number>();
   let versionCounter = 1;
 
-  // Build version mapping if numberVersions is enabled
-  if (numberVersions) {
-    for (const project of perProjectDuplicates) {
-      for (const pkg of project.duplicatePackages) {
-        for (const instance of pkg.instances) {
-          const versionKey = `${pkg.packageName}@${instance.version}`;
-          if (!versionMap.has(versionKey)) {
-            versionMap.set(versionKey, versionCounter++);
-          }
+  // Always build version mapping (version numbering always enabled)
+  for (const project of perProjectDuplicates) {
+    for (const pkg of project.duplicatePackages) {
+      for (const instance of pkg.instances) {
+        const versionKey = `${pkg.packageName}@${instance.version}`;
+        if (!versionMap.has(versionKey)) {
+          versionMap.set(versionKey, versionCounter++);
         }
       }
     }
@@ -731,27 +722,21 @@ export function formatPerProjectDuplicates(
                 useColor,
                 "",
                 instance.dependencyInfo.allPaths,
-                compactTree,
-                numberVersions ? versionMap : undefined,
+                compactTreeDepth,
+                versionMap,
                 packageName,
               ),
             );
           } else {
-            let displayVersion = versionColor(instance.id);
-            if (numberVersions) {
-              const versionKey = `${packageName}@${instance.version}`;
-              const versionNum = versionMap.get(versionKey);
-              displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
-            }
+            const versionKey = `${packageName}@${instance.version}`;
+            const versionNum = versionMap.get(versionKey);
+            const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
             lines.push(`    ${displayVersion}`);
           }
         } else {
-          let displayVersion = versionColor(instance.id);
-          if (numberVersions) {
-            const versionKey = `${packageName}@${instance.version}`;
-            const versionNum = versionMap.get(versionKey);
-            displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
-          }
+          const versionKey = `${packageName}@${instance.version}`;
+          const versionNum = versionMap.get(versionKey);
+          const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
           lines.push(`    ${displayVersion}`);
         }
       }

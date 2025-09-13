@@ -456,8 +456,7 @@ export class DuplicatesUsecase {
     format: OutputFormat = "tree",
     showDependencyTree = false,
     _maxDepth = 10,
-    compactTree = false,
-    numberVersions = false,
+    compactTreeDepth?: number,
   ): string {
     if (format === "json") {
       // Create clean version without dependencies for JSON output
@@ -479,8 +478,7 @@ export class DuplicatesUsecase {
       perProjectDuplicates,
       true,
       showDependencyTree,
-      compactTree,
-      numberVersions,
+      compactTreeDepth,
     );
   }
 
@@ -501,8 +499,7 @@ export class DuplicatesUsecase {
     duplicates: DuplicateInstance[],
     format: OutputFormat = "tree",
     showDependencyTree = false,
-    compactTree = false,
-    numberVersions = false,
+    compactTreeDepth?: number,
   ): string {
     if (format === "json") {
       // Create clean version without dependencies for JSON output
@@ -522,8 +519,7 @@ export class DuplicatesUsecase {
       duplicates, 
       true, 
       showDependencyTree, 
-      compactTree, 
-      numberVersions
+      compactTreeDepth,
     );
   }
 }
