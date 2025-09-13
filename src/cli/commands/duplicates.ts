@@ -4,10 +4,6 @@ import {
   DuplicatesUsecase,
   type OutputFormat,
 } from "../../usecases/duplicates.usecase.js";
-import {
-  findLinkDependencies,
-  displayLinkDependencyWarning,
-} from "../../core/utils.js";
 import chalk from "chalk";
 
 export function createDuplicatesCommand(): Command {
@@ -51,19 +47,13 @@ export function createDuplicatesCommand(): Command {
         // Create usecase
         const duplicatesUsecase = new DuplicatesUsecase(lockfile);
 
-        // Check for link dependencies first (only for non-wildcard patterns)
+        // Check if non-wildcard packages exist
         if (packageNames.length > 0) {
           const nonWildcardNames = packageNames.filter(
             (name) => !name.includes("*"),
           );
 
           if (nonWildcardNames.length > 0) {
-            const linkDeps = findLinkDependencies(lockfile, nonWildcardNames);
-            if (linkDeps.length > 0) {
-              displayLinkDependencyWarning(linkDeps);
-            }
-
-            // Check if non-wildcard packages exist
             const { missing } =
               duplicatesUsecase.packagesExist(nonWildcardNames);
             if (missing.length > 0) {

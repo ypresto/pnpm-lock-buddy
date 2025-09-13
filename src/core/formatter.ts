@@ -416,7 +416,7 @@ function formatDependencyTree(
 
     const isLinked = step.specifier.startsWith("link:");
     let typeCode = "";
-    
+
     if (isLinked) {
       typeCode = "link:";
     } else {
