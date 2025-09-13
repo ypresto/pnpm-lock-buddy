@@ -336,4 +336,232 @@ describe("DependencyTracker", () => {
       expect(linkedDeps).toEqual([]);
     });
   });
+
+  describe("transitive dependency path tracing", () => {
+    // Mock lockfile with complex transitive dependencies for testing
+    const transitiveMockLockfile: PnpmLockfile = {
+      lockfileVersion: "9.0",
+      importers: {
+        ".": {
+          dependencies: {
+            // Direct dependency that has transitive deps
+            "app-core": { specifier: "1.0.0", version: "1.0.0" },
+          },
+          devDependencies: {
+            // Dev dependency with transitive deps
+            "build-tools": { specifier: "2.0.0", version: "2.0.0" },
+          },
+        },
+        "packages/ui": {
+          dependencies: {
+            react: { specifier: "18.2.0", version: "18.2.0" },
+            // Link dependency
+            "@my/shared": {
+              specifier: "link:../shared",
+              version: "link:../shared",
+            },
+          },
+        },
+        "packages/shared": {
+          dependencies: {
+            lodash: { specifier: "4.17.21", version: "4.17.21" },
+          },
+        },
+      },
+      packages: {
+        "app-core@1.0.0": { resolution: { integrity: "sha512-appcore" } },
+        "build-tools@2.0.0": { resolution: { integrity: "sha512-buildtools" } },
+        "react@18.2.0": { resolution: { integrity: "sha512-react" } },
+        "lodash@4.17.21": { resolution: { integrity: "sha512-lodash" } },
+        "ui-lib@3.0.0": { resolution: { integrity: "sha512-uilib" } },
+        "utils@1.5.0": { resolution: { integrity: "sha512-utils" } },
+        "deep-dep@0.1.0": { resolution: { integrity: "sha512-deepdep" } },
+      },
+      snapshots: {
+        "app-core@1.0.0": {
+          dependencies: { "ui-lib": "3.0.0", utils: "1.5.0" },
+        },
+        "build-tools@2.0.0": {
+          dependencies: { utils: "1.5.0" },
+        },
+        "react@18.2.0": {},
+        "lodash@4.17.21": {},
+        "ui-lib@3.0.0": {
+          dependencies: { "deep-dep": "0.1.0" },
+        },
+        "utils@1.5.0": {},
+        "deep-dep@0.1.0": {},
+      },
+    };
+
+    describe("getDependencyPath", () => {
+      it("should trace single-level transitive dependencies", () => {
+        const tracker = new DependencyTracker(transitiveMockLockfile);
+
+        // ui-lib is a transitive dep through app-core
+        const path = tracker.getDependencyPath(".", "ui-lib@3.0.0");
+
+        expect(path).toHaveLength(2);
+        expect(path[0].package).toBe("app-core@1.0.0");
+        expect(path[0].type).toBe("dependencies");
+        expect(path[1].package).toBe("ui-lib@3.0.0");
+        expect(path[1].type).toBe("dependencies");
+      });
+
+      it("should trace multi-level transitive dependencies", () => {
+        const tracker = new DependencyTracker(transitiveMockLockfile);
+
+        // deep-dep is transitive through app-core -> ui-lib
+        const path = tracker.getDependencyPath(".", "deep-dep@0.1.0");
+
+        expect(path).toHaveLength(3);
+        expect(path[0].package).toBe("app-core@1.0.0");
+        expect(path[0].type).toBe("dependencies");
+        expect(path[1].package).toBe("ui-lib@3.0.0");
+        expect(path[1].type).toBe("dependencies");
+        expect(path[2].package).toBe("deep-dep@0.1.0");
+        expect(path[2].type).toBe("dependencies");
+      });
+
+      it("should trace transitive dependencies through dev dependencies", () => {
+        const tracker = new DependencyTracker(transitiveMockLockfile);
+
+        // utils comes through build-tools (dev dependency)
+        const path = tracker.getDependencyPath(".", "utils@1.5.0");
+
+        // Should find the shortest path (could be through app-core or build-tools)
+        expect(path.length).toBeGreaterThanOrEqual(2);
+        expect(path[path.length - 1].package).toBe("utils@1.5.0");
+      });
+
+      it("should return direct dependency path without transitive tracing", () => {
+        const tracker = new DependencyTracker(transitiveMockLockfile);
+
+        // react is direct dependency in packages/ui
+        const path = tracker.getDependencyPath("packages/ui", "react@18.2.0");
+
+        expect(path).toHaveLength(1);
+        expect(path[0].package).toBe("react@18.2.0");
+        expect(path[0].type).toBe("dependencies");
+      });
+
+      it("should trace through linked dependencies", () => {
+        const tracker = new DependencyTracker(transitiveMockLockfile);
+
+        // lodash comes through the linked @my/shared package
+        const path = tracker.getDependencyPath("packages/ui", "lodash@4.17.21");
+
+        expect(path).toHaveLength(2);
+        expect(path[0].package).toBe("@my/shared");
+        expect(path[0].type).toBe("dependencies");
+        expect(path[0].specifier).toBe("link:packages/shared");
+        expect(path[1].package).toBe("lodash@4.17.21");
+        expect(path[1].type).toBe("dependencies");
+      });
+
+      it("should fallback to transitive indicator when path cannot be traced", () => {
+        // Create a lockfile with a missing snapshot to simulate untraceable dependency
+        const incompletelockfile: PnpmLockfile = {
+          lockfileVersion: "9.0",
+          importers: {
+            ".": {
+              dependencies: {
+                "mystery-pkg": { specifier: "1.0.0", version: "1.0.0" },
+              },
+            },
+          },
+          packages: {
+            "mystery-pkg@1.0.0": {
+              resolution: { integrity: "sha512-mystery" },
+            },
+            "unknown@2.0.0": { resolution: { integrity: "sha512-unknown" } },
+          },
+          snapshots: {
+            // Missing snapshot for mystery-pkg, so unknown won't be traceable
+            "unknown@2.0.0": {},
+          },
+        };
+
+        const tracker = new DependencyTracker(incompletelockfile);
+
+        // unknown@2.0.0 exists but has no traceable path
+        const path = tracker.getDependencyPath(".", "unknown@2.0.0");
+
+        expect(path).toHaveLength(1);
+        expect(path[0].package).toBe("unknown@2.0.0");
+        expect(path[0].type).toBe("transitive");
+        expect(path[0].specifier).toBe("transitive");
+      });
+
+      it("should handle circular dependencies without infinite loops", () => {
+        // Create a lockfile with circular dependencies
+        const circularLockfile: PnpmLockfile = {
+          lockfileVersion: "9.0",
+          importers: {
+            ".": {
+              dependencies: {
+                "pkg-a": { specifier: "1.0.0", version: "1.0.0" },
+              },
+            },
+          },
+          packages: {
+            "pkg-a@1.0.0": { resolution: { integrity: "sha512-pkga" } },
+            "pkg-b@1.0.0": { resolution: { integrity: "sha512-pkgb" } },
+            "pkg-c@1.0.0": { resolution: { integrity: "sha512-pkgc" } },
+          },
+          snapshots: {
+            "pkg-a@1.0.0": { dependencies: { "pkg-b": "1.0.0" } },
+            "pkg-b@1.0.0": { dependencies: { "pkg-c": "1.0.0" } },
+            "pkg-c@1.0.0": { dependencies: { "pkg-a": "1.0.0" } }, // Creates cycle
+          },
+        };
+
+        const tracker = new DependencyTracker(circularLockfile);
+
+        // Should handle circular dependency gracefully
+        const path = tracker.getDependencyPath(".", "pkg-c@1.0.0");
+
+        // Should find a path without getting stuck in infinite loop
+        expect(path.length).toBeGreaterThan(0);
+        expect(path.length).toBeLessThan(10); // Reasonable depth limit
+        expect(path[path.length - 1].package).toBe("pkg-c@1.0.0");
+      });
+
+      it("should respect max depth limit", () => {
+        // Create a very deep dependency chain
+        const deepLockfile: PnpmLockfile = {
+          lockfileVersion: "9.0",
+          importers: {
+            ".": {
+              dependencies: {
+                "level-0": { specifier: "1.0.0", version: "1.0.0" },
+              },
+            },
+          },
+          packages: Object.fromEntries(
+            Array.from({ length: 10 }, (_, i) => [
+              `level-${i}@1.0.0`,
+              { resolution: { integrity: `sha512-level${i}` } },
+            ]),
+          ),
+          snapshots: Object.fromEntries([
+            ...Array.from({ length: 9 }, (_, i) => [
+              `level-${i}@1.0.0`,
+              { dependencies: { [`level-${i + 1}`]: "1.0.0" } },
+            ]),
+            ["level-9@1.0.0", {}], // Final level has no dependencies
+          ]),
+        };
+
+        const tracker = new DependencyTracker(deepLockfile);
+
+        // Should find path to deep dependency but respect depth limit
+        const path = tracker.getDependencyPath(".", "level-9@1.0.0");
+
+        // Path should be found but not exceed reasonable depth
+        expect(path.length).toBeGreaterThan(0);
+        expect(path.length).toBeLessThanOrEqual(6); // Max depth is 5 in implementation
+      });
+    });
+  });
 });

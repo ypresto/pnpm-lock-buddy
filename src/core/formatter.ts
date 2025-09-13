@@ -378,7 +378,7 @@ function getTypeShortCode(type: string, isOptional = false): string {
     devDependencies: "dev",
     optionalDependencies: "optional",
     peerDependencies: "peer",
-    transitive: "", // transitive also shows no indicator by default
+    transitive: "transitive", // now show explicit transitive indicator
     file: "file:",
   };
 

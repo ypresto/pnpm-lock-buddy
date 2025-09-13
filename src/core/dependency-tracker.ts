@@ -411,8 +411,18 @@ export class DependencyTracker {
     );
     if (linkedPath.length > 0) return linkedPath;
 
-    // 3. Fallback: just the target
-    return [{ package: packageId, type: "transitive", specifier: "unknown" }];
+    // 3. Try to trace actual transitive dependency path
+    const transitivePath = this.traceTransitivePath(
+      importerPath,
+      packageName,
+      packageId,
+    );
+    if (transitivePath.length > 0) return transitivePath;
+
+    // 4. Fallback: explicitly mark as transitive with indicator
+    return [
+      { package: packageId, type: "transitive", specifier: "transitive" },
+    ];
   }
 
   /**
@@ -507,6 +517,148 @@ export class DependencyTracker {
 
           return [linkStep, fileStep];
         }
+      }
+    }
+
+    return [];
+  }
+
+  /**
+   * Trace transitive dependency path through the dependency graph
+   */
+  private traceTransitivePath(
+    importerPath: string,
+    packageName: string,
+    packageId: string,
+  ): DependencyPathStep[] {
+    const importerData = this.lockfile.importers[importerPath];
+    if (!importerData) return [];
+
+    // Get all direct dependencies of the importer
+    const allDirectDeps = {
+      ...importerData.dependencies,
+      ...importerData.devDependencies,
+      ...importerData.optionalDependencies,
+    };
+
+    // Try to find a path through each direct dependency
+    for (const [directDepName, directDepInfo] of Object.entries(
+      allDirectDeps || {},
+    )) {
+      if (directDepInfo.version.startsWith("link:")) {
+        // Skip link dependencies as they're handled separately
+        continue;
+      }
+
+      // Find the snapshot ID for this direct dependency
+      let directSnapshotId = this.findSnapshotId(
+        directDepName,
+        directDepInfo.version,
+      );
+      if (!directSnapshotId) {
+        directSnapshotId = `${directDepName}@${directDepInfo.version}`;
+      }
+
+      // Check if this direct dependency leads to our target package
+      const path = this.findPathThroughSnapshot(
+        directSnapshotId,
+        packageName,
+        packageId,
+        new Set(), // visited to avoid cycles
+        5, // max depth to prevent infinite recursion
+      );
+
+      if (path.length > 0) {
+        // Determine the type of the direct dependency
+        let directDepType = "dependencies";
+        if (importerData.devDependencies?.[directDepName]) {
+          directDepType = "devDependencies";
+        } else if (importerData.optionalDependencies?.[directDepName]) {
+          directDepType = "optionalDependencies";
+        }
+
+        // Build the complete path starting from the direct dependency
+        const directStep: DependencyPathStep = {
+          package: directSnapshotId,
+          type: directDepType,
+          specifier: directDepInfo.specifier,
+        };
+
+        return [directStep, ...path];
+      }
+    }
+
+    return [];
+  }
+
+  /**
+   * Find path from a snapshot to target package through dependency graph
+   */
+  private findPathThroughSnapshot(
+    currentSnapshotId: string,
+    targetPackageName: string,
+    targetPackageId: string,
+    visited: Set<string>,
+    maxDepth: number,
+  ): DependencyPathStep[] {
+    if (maxDepth <= 0 || visited.has(currentSnapshotId)) {
+      return [];
+    }
+
+    visited.add(currentSnapshotId);
+
+    const snapshotData = this.lockfile.snapshots?.[currentSnapshotId];
+    if (!snapshotData) return [];
+
+    const snapshotDeps = {
+      ...snapshotData.dependencies,
+      ...snapshotData.optionalDependencies,
+    };
+
+    // Check if target package is a direct dependency of current snapshot
+    for (const [depName, depVersion] of Object.entries(snapshotDeps || {})) {
+      if (depName === targetPackageName) {
+        // Found target, check if this specific version matches
+        const depSnapshotId =
+          this.findSnapshotId(depName, depVersion) ||
+          `${depName}@${depVersion}`;
+
+        if (
+          depSnapshotId === targetPackageId ||
+          targetPackageId.startsWith(`${depName}@${depVersion}`) ||
+          depSnapshotId.startsWith(targetPackageId)
+        ) {
+          return [
+            {
+              package: targetPackageId,
+              type: "dependencies", // Most snapshot deps are regular dependencies
+              specifier: depVersion,
+            },
+          ];
+        }
+      }
+    }
+
+    // Recursively search through dependencies
+    for (const [depName, depVersion] of Object.entries(snapshotDeps || {})) {
+      const depSnapshotId =
+        this.findSnapshotId(depName, depVersion) || `${depName}@${depVersion}`;
+
+      const subPath = this.findPathThroughSnapshot(
+        depSnapshotId,
+        targetPackageName,
+        targetPackageId,
+        new Set(visited), // Create new visited set for this branch
+        maxDepth - 1,
+      );
+
+      if (subPath.length > 0) {
+        const intermediateStep: DependencyPathStep = {
+          package: depSnapshotId,
+          type: "dependencies",
+          specifier: depVersion,
+        };
+        return [intermediateStep, ...subPath];
       }
     }
 
