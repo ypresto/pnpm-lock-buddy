@@ -379,6 +379,7 @@ function getTypeShortCode(type: string, isOptional = false): string {
     optionalDependencies: "o",
     peerDependencies: "p",
     transitive: "t",
+    file: "F",
   };
 
   // Handle optional combinations

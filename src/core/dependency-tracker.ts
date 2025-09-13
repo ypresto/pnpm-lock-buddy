@@ -485,6 +485,28 @@ export class DependencyTracker {
           };
           return [linkStep, ...linkedDirectPath];
         }
+
+        // New: Check if the packageId is a file: variant of the linked package itself
+        // This happens when the linked package has different peer dependency resolutions
+        if (
+          packageName === linkedDep.linkName &&
+          packageId.includes(`file:${linkedDep.resolvedImporter}`)
+        ) {
+          const linkStep: DependencyPathStep = {
+            package: linkedDep.linkName,
+            type: "dependencies",
+            specifier: `link:${linkedDep.resolvedImporter}`,
+          };
+
+          // The file: version is essentially the same package with different peer deps
+          const fileStep: DependencyPathStep = {
+            package: packageId,
+            type: "file",
+            specifier: "file (peer dependency variant)",
+          };
+
+          return [linkStep, fileStep];
+        }
       }
     }
 
