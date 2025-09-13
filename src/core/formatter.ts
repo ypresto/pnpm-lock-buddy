@@ -499,14 +499,11 @@ export function formatPerProjectDuplicates(
             (path.length === 1 && path[0].type !== "transitive");
 
           if (hasRealPath) {
-            lines.push(`    ${group.importer}`);
             lines.push(...formatDependencyTree(path, versionColor, useColor));
           } else {
-            // Can't trace path - just show the package without fake tree
             lines.push(`    ${versionColor(instance.id)}`);
           }
         } else {
-          // Simple format without dependency paths
           lines.push(`    ${versionColor(instance.id)}`);
         }
       }
