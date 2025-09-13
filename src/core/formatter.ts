@@ -348,6 +348,7 @@ export function formatDuplicates(
               versionColor,
               useColor,
               "  ",
+              instance.dependencyInfo.allPaths,
             ),
           );
         }
@@ -405,53 +406,103 @@ function formatDependencyTree(
   versionColor: (s: string) => string,
   _useColor: boolean,
   basePrefix = "",
+  allPaths?: DependencyPathStep[][],
 ): string[] {
   if (path.length === 0) return [];
 
   const lines: string[] = [];
 
-  for (let i = 0; i < path.length; i++) {
-    const step = path[i];
-    if (!step) continue;
+  // If we have multiple paths (diamond dependency), show all of them
+  if (allPaths && allPaths.length > 1) {
+    for (let pathIndex = 0; pathIndex < allPaths.length; pathIndex++) {
+      const currentPath = allPaths[pathIndex];
+      if (!currentPath) continue;
 
-    const isLinked = step.specifier.startsWith("link:");
-    let typeCode = "";
+      // Add spacing between paths (except before the first one)
+      if (pathIndex > 0) {
+        lines.push(`${basePrefix}    │`);
+      }
 
-    if (isLinked) {
-      typeCode = "link:";
-    } else {
-      typeCode = getTypeShortCode(step.type);
+      for (let i = 0; i < currentPath.length; i++) {
+        const step = currentPath[i];
+        if (!step) continue;
+
+        const isLinked = step.specifier.startsWith("link:");
+        let typeCode = "";
+
+        if (isLinked) {
+          typeCode = "link:";
+        } else {
+          typeCode = getTypeShortCode(step.type);
+        }
+
+        // Determine tree characters based on position with proper depth indentation
+        let prefix = "";
+        if (i === 0) {
+          // First step in each path
+          prefix =
+            i === currentPath.length - 1
+              ? `${basePrefix}    └─`
+              : `${basePrefix}    ├─`;
+        } else {
+          // Intermediate steps with increasing indentation
+          const isLast = i === currentPath.length - 1;
+          const parentSpacing = `${basePrefix}    ` + "│  ".repeat(i);
+          prefix = isLast ? `${parentSpacing}└─` : `${parentSpacing}├─`;
+        }
+
+        // Only show type label if there's a type code
+        const typeLabel = typeCode ? `(${typeCode})` : "";
+        // Only colorize the final leaf package (target)
+        const isLeaf = i === currentPath.length - 1;
+        const packageName = isLeaf ? versionColor(step.package) : step.package;
+
+        const separator = typeLabel ? "─ " : "── ";
+        lines.push(`${prefix}${typeLabel}${separator}${packageName}`);
+      }
     }
+  } else {
+    // Original single path logic
+    for (let i = 0; i < path.length; i++) {
+      const step = path[i];
+      if (!step) continue;
 
-    // Determine tree characters based on position with proper depth indentation
-    let prefix = "";
-    if (i === 0) {
-      // First step (after importer)
-      prefix =
-        i === path.length - 1 ? `${basePrefix}    └─` : `${basePrefix}    ├─`;
-    } else {
-      // Intermediate steps with increasing indentation
-      const isLast = i === path.length - 1;
-      const parentSpacing = `${basePrefix}    ` + "│  ".repeat(i);
-      prefix = isLast ? `${parentSpacing}└─` : `${parentSpacing}├─`;
+      const isLinked = step.specifier.startsWith("link:");
+      let typeCode = "";
+
+      if (isLinked) {
+        typeCode = "link:";
+      } else {
+        typeCode = getTypeShortCode(step.type);
+      }
+
+      // Determine tree characters based on position with proper depth indentation
+      let prefix = "";
+      if (i === 0) {
+        // First step (after importer)
+        prefix =
+          i === path.length - 1 ? `${basePrefix}    └─` : `${basePrefix}    ├─`;
+      } else {
+        // Intermediate steps with increasing indentation
+        const isLast = i === path.length - 1;
+        const parentSpacing = `${basePrefix}    ` + "│  ".repeat(i);
+        prefix = isLast ? `${parentSpacing}└─` : `${parentSpacing}├─`;
+      }
+
+      // Only show type label if there's a type code
+      const typeLabel = typeCode ? `(${typeCode})` : "";
+      // Only colorize the final leaf package (target)
+      const isLeaf = i === path.length - 1;
+      const packageName = isLeaf ? versionColor(step.package) : step.package;
+
+      const separator = typeLabel ? "─ " : "── ";
+      lines.push(`${prefix}${typeLabel}${separator}${packageName}`);
     }
-
-    // Only show type label if there's a type code
-    const typeLabel = typeCode ? `(${typeCode})` : "";
-    // Only colorize the final leaf package (target)
-    const isLeaf = i === path.length - 1;
-    const packageName = isLeaf ? versionColor(step.package) : step.package;
-
-    const separator = typeLabel ? "─ " : "── ";
-    lines.push(`${prefix}${typeLabel}${separator}${packageName}`);
   }
 
   return lines;
 }
 
-/**
- * Format per-project duplicates similar to existing format but grouped by package then importer
- */
 export function formatPerProjectDuplicates(
   perProjectDuplicates: PerProjectDuplicate[],
   useColor = true,
@@ -508,7 +559,15 @@ export function formatPerProjectDuplicates(
             (path.length === 1 && path[0].type !== "transitive");
 
           if (hasRealPath) {
-            lines.push(...formatDependencyTree(path, versionColor, useColor));
+            lines.push(
+              ...formatDependencyTree(
+                path,
+                versionColor,
+                useColor,
+                "",
+                instance.dependencyInfo.allPaths,
+              ),
+            );
           } else {
             lines.push(`    ${versionColor(instance.id)}`);
           }

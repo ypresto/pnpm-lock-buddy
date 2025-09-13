@@ -377,23 +377,39 @@ export class DependencyTracker {
       return this.dependencyPaths.get(cacheKey)!;
     }
 
-    // Build path using unified logic
-    const path = this.buildUnifiedPath(importerPath, packageId);
+    // Build path using unified logic - use first path from all paths
+    const allPaths = this.buildAllUnifiedPaths(importerPath, packageId);
+    const path = allPaths.length > 0 && allPaths[0] ? allPaths[0] : [];
     this.dependencyPaths.set(cacheKey, path);
     return path;
   }
 
   /**
-   * Build dependency path using unified linked + non-linked traversal
+   * Get all dependency paths from importer to package (for diamond dependencies)
    */
-  private buildUnifiedPath(
+  getAllDependencyPaths(
     importerPath: string,
     packageId: string,
-  ): DependencyPathStep[] {
+  ): DependencyPathStep[][] {
+    this.initialize();
+
+    // Build all paths using unified logic
+    const paths = this.buildAllUnifiedPaths(importerPath, packageId);
+    return paths;
+  }
+
+  /**
+   * Build all dependency paths using unified linked + non-linked traversal
+   */
+  private buildAllUnifiedPaths(
+    importerPath: string,
+    packageId: string,
+  ): DependencyPathStep[][] {
     const importerData = this.lockfile.importers[importerPath];
     if (!importerData) return [];
 
     const packageName = parsePackageString(packageId).name;
+    const allPaths: DependencyPathStep[][] = [];
 
     // 1. Check if it's a direct dependency
     const directPath = this.checkDirectDependency(
@@ -401,7 +417,9 @@ export class DependencyTracker {
       packageName,
       packageId,
     );
-    if (directPath) return directPath;
+    if (directPath) {
+      allPaths.push(directPath);
+    }
 
     // 2. Check if it comes through linked dependencies
     const linkedPath = this.checkLinkedDependencyPath(
@@ -409,20 +427,27 @@ export class DependencyTracker {
       packageName,
       packageId,
     );
-    if (linkedPath.length > 0) return linkedPath;
+    if (linkedPath.length > 0) {
+      allPaths.push(linkedPath);
+    }
 
-    // 3. Try to trace actual transitive dependency path
-    const transitivePath = this.traceTransitivePath(
+    // 3. Find ALL transitive dependency paths
+    const transitivePaths = this.traceAllTransitivePaths(
       importerPath,
       packageName,
       packageId,
     );
-    if (transitivePath.length > 0) return transitivePath;
+    allPaths.push(...transitivePaths);
 
-    // 4. Fallback: explicitly mark as transitive with indicator
-    return [
-      { package: packageId, type: "transitive", specifier: "transitive" },
-    ];
+    // 4. If no paths found, add fallback
+    if (allPaths.length === 0) {
+      allPaths.push([
+        { package: packageId, type: "transitive", specifier: "transitive" },
+      ]);
+    }
+
+    // Remove duplicate paths (same sequence of packages)
+    return this.deduplicatePaths(allPaths);
   }
 
   /**
@@ -524,15 +549,17 @@ export class DependencyTracker {
   }
 
   /**
-   * Trace transitive dependency path through the dependency graph
+   * Trace all transitive dependency paths through the dependency graph
    */
-  private traceTransitivePath(
+  private traceAllTransitivePaths(
     importerPath: string,
     packageName: string,
     packageId: string,
-  ): DependencyPathStep[] {
+  ): DependencyPathStep[][] {
     const importerData = this.lockfile.importers[importerPath];
     if (!importerData) return [];
+
+    const allPaths: DependencyPathStep[][] = [];
 
     // Get all direct dependencies of the importer
     const allDirectDeps = {
@@ -541,7 +568,7 @@ export class DependencyTracker {
       ...importerData.optionalDependencies,
     };
 
-    // Try to find a path through each direct dependency
+    // Try to find paths through each direct dependency
     for (const [directDepName, directDepInfo] of Object.entries(
       allDirectDeps || {},
     )) {
@@ -560,7 +587,7 @@ export class DependencyTracker {
       }
 
       // Check if this direct dependency leads to our target package
-      const path = this.findPathThroughSnapshot(
+      const paths = this.findAllPathsThroughSnapshot(
         directSnapshotId,
         packageName,
         packageId,
@@ -568,7 +595,7 @@ export class DependencyTracker {
         5, // max depth to prevent infinite recursion
       );
 
-      if (path.length > 0) {
+      if (paths.length > 0) {
         // Determine the type of the direct dependency
         let directDepType = "dependencies";
         if (importerData.devDependencies?.[directDepName]) {
@@ -577,30 +604,32 @@ export class DependencyTracker {
           directDepType = "optionalDependencies";
         }
 
-        // Build the complete path starting from the direct dependency
+        // Build the complete paths starting from the direct dependency
         const directStep: DependencyPathStep = {
           package: directSnapshotId,
           type: directDepType,
           specifier: directDepInfo.specifier,
         };
 
-        return [directStep, ...path];
+        for (const path of paths) {
+          allPaths.push([directStep, ...path]);
+        }
       }
     }
 
-    return [];
+    return allPaths;
   }
 
   /**
-   * Find path from a snapshot to target package through dependency graph
+   * Find all paths from a snapshot to target package through dependency graph
    */
-  private findPathThroughSnapshot(
+  private findAllPathsThroughSnapshot(
     currentSnapshotId: string,
     targetPackageName: string,
     targetPackageId: string,
     visited: Set<string>,
     maxDepth: number,
-  ): DependencyPathStep[] {
+  ): DependencyPathStep[][] {
     if (maxDepth <= 0 || visited.has(currentSnapshotId)) {
       return [];
     }
@@ -615,6 +644,8 @@ export class DependencyTracker {
       ...snapshotData.optionalDependencies,
     };
 
+    const allPaths: DependencyPathStep[][] = [];
+
     // Check if target package is a direct dependency of current snapshot
     for (const [depName, depVersion] of Object.entries(snapshotDeps || {})) {
       if (depName === targetPackageName) {
@@ -628,23 +659,23 @@ export class DependencyTracker {
           targetPackageId.startsWith(`${depName}@${depVersion}`) ||
           depSnapshotId.startsWith(targetPackageId)
         ) {
-          return [
+          allPaths.push([
             {
               package: targetPackageId,
               type: "dependencies", // Most snapshot deps are regular dependencies
               specifier: depVersion,
             },
-          ];
+          ]);
         }
       }
     }
 
-    // Recursively search through dependencies
+    // Recursively search through dependencies for more paths
     for (const [depName, depVersion] of Object.entries(snapshotDeps || {})) {
       const depSnapshotId =
         this.findSnapshotId(depName, depVersion) || `${depName}@${depVersion}`;
 
-      const subPath = this.findPathThroughSnapshot(
+      const subPaths = this.findAllPathsThroughSnapshot(
         depSnapshotId,
         targetPackageName,
         targetPackageId,
@@ -652,16 +683,40 @@ export class DependencyTracker {
         maxDepth - 1,
       );
 
-      if (subPath.length > 0) {
+      if (subPaths.length > 0) {
         const intermediateStep: DependencyPathStep = {
           package: depSnapshotId,
           type: "dependencies",
           specifier: depVersion,
         };
-        return [intermediateStep, ...subPath];
+
+        for (const subPath of subPaths) {
+          allPaths.push([intermediateStep, ...subPath]);
+        }
       }
     }
 
-    return [];
+    return allPaths;
+  }
+
+  /**
+   * Remove duplicate paths by comparing package sequences
+   */
+  private deduplicatePaths(
+    paths: DependencyPathStep[][],
+  ): DependencyPathStep[][] {
+    const seen = new Set<string>();
+    const uniquePaths: DependencyPathStep[][] = [];
+
+    for (const path of paths) {
+      // Create a signature based on the sequence of packages
+      const signature = path.map((step) => step.package).join(" -> ");
+      if (!seen.has(signature)) {
+        seen.add(signature);
+        uniquePaths.push(path);
+      }
+    }
+
+    return uniquePaths;
   }
 }

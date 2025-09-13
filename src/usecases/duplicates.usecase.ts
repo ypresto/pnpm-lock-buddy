@@ -415,6 +415,12 @@ export class DuplicatesUsecase {
       instanceId,
     );
 
+    // Get all paths for diamond dependencies
+    const allPaths = this.dependencyTracker.getAllDependencyPaths(
+      importerPath,
+      instanceId,
+    );
+
     const typeSummary =
       path.length > 0 ? this.getTypeSummaryFromPath(path) : "transitive";
 
@@ -424,6 +430,7 @@ export class DuplicatesUsecase {
         path.length > 0
           ? path
           : [{ package: instanceId, type: "transitive", specifier: "unknown" }],
+      allPaths: allPaths.length > 1 ? allPaths : undefined, // Only include if multiple paths exist
     };
   }
 
