@@ -560,8 +560,12 @@ export class DependencyTracker {
     if (!importerData) return [];
 
     const allPaths: DependencyPathStep[][] = [];
-    const cache = new Map<string, DependencyPathStep[][]>(); // Add cache for this traversal
-    const globalVisited = new Set<string>(); // Use global visited set across all direct deps
+    const cache = new Map<string, DependencyPathStep[][]>();
+    const globalVisited = new Set<string>();
+    
+    // AGGRESSIVE performance limits for large monorepos
+    const MAX_TOTAL_PATHS = 10; // Reduced from 50
+    const MAX_DIRECT_DEPS_TO_CHECK = 20; // Don't check all direct deps
 
     // Get all direct dependencies of the importer
     const allDirectDeps = {
@@ -570,16 +574,20 @@ export class DependencyTracker {
       ...importerData.optionalDependencies,
     };
 
+    // Only check first N direct dependencies for performance
+    const directDepsEntries = Object.entries(allDirectDeps || {}).slice(0, MAX_DIRECT_DEPS_TO_CHECK);
+
     // Try to find paths through each direct dependency
-    for (const [directDepName, directDepInfo] of Object.entries(
-      allDirectDeps || {},
-    )) {
+    for (const [directDepName, directDepInfo] of directDepsEntries) {
+      // Early termination if we have enough paths already
+      if (allPaths.length >= MAX_TOTAL_PATHS) {
+        break;
+      }
+      
       if (directDepInfo.version.startsWith("link:")) {
-        // Skip link dependencies as they're handled separately
         continue;
       }
 
-      // Find the snapshot ID for this direct dependency
       let directSnapshotId = this.findSnapshotId(
         directDepName,
         directDepInfo.version,
@@ -588,22 +596,17 @@ export class DependencyTracker {
         directSnapshotId = `${directDepName}@${directDepInfo.version}`;
       }
 
-      // Use a fresh visited set for each direct dependency to allow multiple paths
-      // but still prevent infinite loops within each search
-      const visited = new Set(globalVisited);
-      
-      // Check if this direct dependency leads to our target package
+      // Use shared visited set and aggressive depth limiting
       const paths = this.findAllPathsThroughSnapshot(
         directSnapshotId,
         packageName,
         packageId,
-        visited,
-        5, // max depth to prevent infinite recursion
-        cache, // Pass cache to prevent redundant calculations
+        globalVisited,
+        3, // Reduced from 5 for faster execution
+        cache,
       );
 
       if (paths.length > 0) {
-        // Determine the type of the direct dependency
         let directDepType = "dependencies";
         if (importerData.devDependencies?.[directDepName]) {
           directDepType = "devDependencies";
@@ -611,7 +614,6 @@ export class DependencyTracker {
           directDepType = "optionalDependencies";
         }
 
-        // Build the complete paths starting from the direct dependency
         const directStep: DependencyPathStep = {
           package: directSnapshotId,
           type: directDepType,
@@ -620,6 +622,9 @@ export class DependencyTracker {
 
         for (const path of paths) {
           allPaths.push([directStep, ...path]);
+          if (allPaths.length >= MAX_TOTAL_PATHS) {
+            break;
+          }
         }
       }
     }
@@ -652,7 +657,7 @@ export class DependencyTracker {
 
     const snapshotData = this.lockfile.snapshots?.[currentSnapshotId];
     if (!snapshotData) {
-      visited.delete(currentSnapshotId); // Clean up visited set
+      visited.delete(currentSnapshotId);
       return [];
     }
 
@@ -662,11 +667,13 @@ export class DependencyTracker {
     };
 
     const allPaths: DependencyPathStep[][] = [];
+    
+    // AGGRESSIVE performance safeguard
+    const MAX_PATHS_PER_SNAPSHOT = 5; // Very limited
 
     // Check if target package is a direct dependency of current snapshot
     for (const [depName, depVersion] of Object.entries(snapshotDeps || {})) {
       if (depName === targetPackageName) {
-        // Found target, check if this specific version matches
         const depSnapshotId =
           this.findSnapshotId(depName, depVersion) ||
           `${depName}@${depVersion}`;
@@ -679,48 +686,53 @@ export class DependencyTracker {
           allPaths.push([
             {
               package: targetPackageId,
-              type: "dependencies", // Most snapshot deps are regular dependencies
+              type: "dependencies",
               specifier: depVersion,
             },
           ]);
+          
+          // If we find direct dependency, prefer it and limit further search
+          if (allPaths.length >= 3) {
+            break;
+          }
         }
       }
     }
 
-    // Performance safeguard: If we already have many paths, don't search deeper
-    const MAX_PATHS_PER_SNAPSHOT = 50;
-    
-    // Recursively search through dependencies for more paths
-    for (const [depName, depVersion] of Object.entries(snapshotDeps || {})) {
-      // Early termination if we have too many paths already
-      if (allPaths.length >= MAX_PATHS_PER_SNAPSHOT) {
-        break;
-      }
+    // Only search recursively if depth allows and we don't have many paths yet
+    if (maxDepth > 1 && allPaths.length < MAX_PATHS_PER_SNAPSHOT) {
+      // Limit how many dependencies we traverse recursively 
+      const depsToCheck = Object.entries(snapshotDeps || {}).slice(0, 10);
       
-      const depSnapshotId =
-        this.findSnapshotId(depName, depVersion) || `${depName}@${depVersion}`;
+      for (const [depName, depVersion] of depsToCheck) {
+        if (allPaths.length >= MAX_PATHS_PER_SNAPSHOT) {
+          break;
+        }
+        
+        const depSnapshotId =
+          this.findSnapshotId(depName, depVersion) || `${depName}@${depVersion}`;
 
-      const subPaths = this.findAllPathsThroughSnapshot(
-        depSnapshotId,
-        targetPackageName,
-        targetPackageId,
-        visited, // Use same visited set to prevent cycles
-        maxDepth - 1,
-        cache, // Pass cache through recursive calls
-      );
+        const subPaths = this.findAllPathsThroughSnapshot(
+          depSnapshotId,
+          targetPackageName,
+          targetPackageId,
+          visited, // Critical: use same visited set
+          maxDepth - 1,
+          cache,
+        );
 
-      if (subPaths.length > 0) {
-        const intermediateStep: DependencyPathStep = {
-          package: depSnapshotId,
-          type: "dependencies",
-          specifier: depVersion,
-        };
+        if (subPaths.length > 0) {
+          const intermediateStep: DependencyPathStep = {
+            package: depSnapshotId,
+            type: "dependencies",
+            specifier: depVersion,
+          };
 
-        for (const subPath of subPaths) {
-          allPaths.push([intermediateStep, ...subPath]);
-          // Early termination within loop
-          if (allPaths.length >= MAX_PATHS_PER_SNAPSHOT) {
-            break;
+          for (const subPath of subPaths) {
+            allPaths.push([intermediateStep, ...subPath]);
+            if (allPaths.length >= MAX_PATHS_PER_SNAPSHOT) {
+              break;
+            }
           }
         }
       }
@@ -729,7 +741,7 @@ export class DependencyTracker {
     // Clean up visited set before returning
     visited.delete(currentSnapshotId);
 
-    // Cache the result before returning
+    // Cache the result
     if (cache) {
       cache.set(cacheKey, allPaths);
     }

@@ -14,282 +14,6 @@ export interface FormattedResult {
   specifier?: string;
 }
 
-/**
- * Group results by package name
- */
-export function groupByPackage(
-  results: FormattedResult[],
-): Record<string, FormattedResult[]> {
-  const grouped: Record<string, FormattedResult[]> = {};
-
-  for (const result of results) {
-    const packageName = result.packageName;
-    if (!grouped[packageName]) {
-      grouped[packageName] = [];
-    }
-    grouped[packageName]!.push(result);
-  }
-
-  return grouped;
-}
-
-/**
- * Parse version string to separate base version from peer dependencies
- */
-function parseVersionWithPeers(version: string): {
-  baseVersion: string;
-  peerDeps: string | null;
-} {
-  const match = version.match(/^([^(]+)(\(.+\))?$/);
-  if (match) {
-    return {
-      baseVersion: match[1] || version,
-      peerDeps: match[2] || null,
-    };
-  }
-  return { baseVersion: version, peerDeps: null };
-}
-
-/**
- * Format results as a tree structure
- */
-export function formatAsTree(
-  results: FormattedResult[],
-  useColor = true,
-): string {
-  if (results.length === 0) {
-    return "No results found.";
-  }
-
-  const lines: string[] = [];
-  const grouped = groupByPackage(results);
-
-  // Color functions (disabled if useColor is false)
-  const packageColor = useColor ? chalk.cyan : (s: string) => s;
-  const versionColor = useColor ? chalk.green : (s: string) => s;
-  const specifierColor = useColor ? chalk.yellow : (s: string) => s;
-  const peerDepColor = useColor ? chalk.magenta : (s: string) => s;
-
-  for (const [packageName, packageResults] of Object.entries(grouped)) {
-    // Group by main section (importers, packages, snapshots)
-    const bySection: Record<string, FormattedResult[]> = {};
-
-    for (const result of packageResults) {
-      const section = result.path[0];
-      if (section && !bySection[section]) {
-        bySection[section] = [];
-      }
-      if (section) {
-        bySection[section]!.push(result);
-      }
-    }
-
-    // Track unique versions for numbering across ALL sections for this package
-    const versionTracker = new Map<string, number>();
-
-    // First pass: collect all unique version strings from all sections
-    const allVersionStrings = new Set<string>();
-    for (const [section, sectionResults] of Object.entries(bySection)) {
-      for (const result of sectionResults) {
-        if (section === "importers" && result.version) {
-          const { peerDeps } = parseVersionWithPeers(result.version);
-          if (peerDeps) {
-            allVersionStrings.add(result.version);
-          }
-        } else if (section === "snapshots") {
-          const packageId = result.path[1];
-          if (packageId) {
-            // Extract version from package ID
-            let parenDepth = 0;
-            let lastValidAtIndex = -1;
-            for (let i = 0; i < packageId.length; i++) {
-              if (packageId[i] === "(") parenDepth++;
-              else if (packageId[i] === ")") parenDepth--;
-              else if (packageId[i] === "@" && parenDepth === 0 && i > 0) {
-                lastValidAtIndex = i;
-              }
-            }
-            if (lastValidAtIndex !== -1) {
-              const versionPart = packageId.substring(lastValidAtIndex + 1);
-              const { peerDeps } = parseVersionWithPeers(versionPart);
-              if (peerDeps) {
-                allVersionStrings.add(versionPart);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Assign numbers to unique version strings (only if there are multiple)
-    if (allVersionStrings.size > 1) {
-      const sortedVersions = Array.from(allVersionStrings).sort();
-      sortedVersions.forEach((versionStr, index) => {
-        versionTracker.set(versionStr, index + 1);
-      });
-    }
-
-    // Format each section
-    for (const [section, sectionResults] of Object.entries(bySection)) {
-      lines.push(`${section}`);
-
-      for (const result of sectionResults) {
-        if (section === "packages") {
-          // For packages, show the full package ID without numbering
-          const packageId = result.path[1];
-          lines.push(`  ${packageId}`);
-          lines.push(`    => ${packageColor(packageName)}`);
-          if (result.specifier) {
-            lines.push(`       specifier: ${specifierColor(result.specifier)}`);
-          }
-          if (result.version) {
-            const { baseVersion, peerDeps } = parseVersionWithPeers(
-              result.version,
-            );
-            const formattedVersion = peerDeps
-              ? `${versionColor(baseVersion)}${peerDepColor(peerDeps)}`
-              : versionColor(result.version);
-            lines.push(`       version: ${formattedVersion}`);
-          }
-        } else if (section === "snapshots") {
-          // For snapshots, show with colorization and numbering
-          const packageId = result.path[1];
-          if (!packageId) continue;
-
-          lines.push(`  ${packageId}`);
-          lines.push(`    => ${packageColor(packageName)}`);
-          if (result.specifier) {
-            lines.push(`       specifier: ${specifierColor(result.specifier)}`);
-          }
-
-          // Use result.version if available (for dependencies within snapshots)
-          if (result.version) {
-            const { baseVersion, peerDeps } = parseVersionWithPeers(
-              result.version,
-            );
-
-            // Check if we need to add a suffix number
-            let versionSuffix = "";
-            if (peerDeps && versionTracker.has(result.version)) {
-              versionSuffix = ` [${versionTracker.get(result.version)}]`;
-            }
-
-            const formattedVersion = peerDeps
-              ? `${versionColor(baseVersion)}${peerDepColor(peerDeps)}${versionSuffix}`
-              : versionColor(result.version);
-            lines.push(`       version: ${formattedVersion}`);
-          } else {
-            // Fallback: extract version from package ID if result.version is not available
-            let versionPart = "";
-            let parenDepth = 0;
-            let lastValidAtIndex = -1;
-
-            for (let i = 0; i < packageId.length; i++) {
-              if (packageId[i] === "(") parenDepth++;
-              else if (packageId[i] === ")") parenDepth--;
-              else if (packageId[i] === "@" && parenDepth === 0 && i > 0) {
-                lastValidAtIndex = i;
-              }
-            }
-
-            if (lastValidAtIndex !== -1) {
-              versionPart = packageId.substring(lastValidAtIndex + 1);
-              const { peerDeps } = parseVersionWithPeers(versionPart);
-
-              let versionSuffix = "";
-              if (peerDeps && versionTracker.has(versionPart)) {
-                versionSuffix = ` [${versionTracker.get(versionPart)}]`;
-              }
-
-              // Extract just the version part from packageId
-              const { baseVersion: displayVersion, peerDeps: displayPeerDeps } =
-                parseVersionWithPeers(versionPart);
-
-              const formattedVersion = displayPeerDeps
-                ? `${versionColor(displayVersion)}${peerDepColor(displayPeerDeps)}${versionSuffix}`
-                : versionColor(displayVersion);
-              lines.push(`       version: ${formattedVersion}`);
-            }
-          }
-        } else if (section === "importers") {
-          // For importers, show the importer path and dependency info
-          const importerPath = result.path[1];
-          const depType = result.path[2];
-
-          lines.push(`  ${importerPath}`);
-          lines.push(`    ${depType}`);
-          lines.push(`      => ${packageColor(packageName)}`);
-          if (result.specifier) {
-            lines.push(
-              `         specifier: ${specifierColor(result.specifier)}`,
-            );
-          }
-          if (result.version) {
-            const { baseVersion, peerDeps } = parseVersionWithPeers(
-              result.version,
-            );
-
-            // Check if we need to add a suffix number
-            let versionSuffix = "";
-            if (peerDeps && versionTracker.has(result.version)) {
-              versionSuffix = ` [${versionTracker.get(result.version)}]`;
-            }
-
-            const formattedVersion = peerDeps
-              ? `${versionColor(baseVersion)}${peerDepColor(peerDeps)}${versionSuffix}`
-              : versionColor(result.version);
-            lines.push(`         version: ${formattedVersion}`);
-          }
-          if (result.type && result.type !== "dependency") {
-            lines.push(`         type: ${result.type}`);
-          }
-        }
-      }
-    }
-  }
-
-  return lines.join("\n");
-}
-
-/**
- * Format results as JSON
- */
-export function formatAsJson(results: FormattedResult[]): string {
-  return JSON.stringify(results, null, 2);
-}
-
-/**
- * Format results as a simple list
- */
-export function formatAsList(results: FormattedResult[]): string {
-  if (results.length === 0) {
-    return "No results found.";
-  }
-
-  const lines: string[] = [];
-
-  for (const result of results) {
-    const packageId = result.version
-      ? `${result.packageName}@${result.version}`
-      : result.packageName;
-
-    const pathStr = result.path.join(" > ");
-
-    let line = `${packageId} - ${pathStr}`;
-
-    if (result.specifier) {
-      line += ` (specifier: ${result.specifier})`;
-    }
-
-    lines.push(line);
-  }
-
-  return lines.join("\n");
-}
-
-/**
- * Format duplicate instances
- */
 export interface DuplicateInstance {
   packageName: string;
   instances: Array<{
@@ -311,9 +35,206 @@ export interface PerProjectDuplicate {
       version: string;
       dependencies: Record<string, string>;
       dependencyInfo: DependencyInfo;
-      dependencyPath?: string; // Keep for backward compatibility
+      dependencyPath?: string;
     }>;
   }>;
+}
+
+function getTypeShortCode(type: string, isOptional = false): string {
+  const baseTypeMapping: Record<string, string> = {
+    dependencies: "",
+    devDependencies: "dev",
+    optionalDependencies: "optional",
+    peerDependencies: "peer",
+    transitive: "transitive",
+    file: "file:",
+  };
+
+  if (isOptional && type !== "optionalDependencies") {
+    const baseCode = baseTypeMapping[type] || "";
+    const parts = [baseCode, "optional"].filter(Boolean);
+    return parts.join(",");
+  }
+
+  return baseTypeMapping[type] || "";
+}
+
+/**
+ * Ultra-fast path formatting with prefix merging
+ * O(n log n) sorting + O(n*m) formatting instead of exponential complexity
+ */
+function formatPathsWithPrefixMerging(
+  allPaths: DependencyPathStep[][],
+  versionColor: (s: string) => string,
+  numberColor: (s: string) => string,
+  basePrefix: string,
+  compactTreeDepth?: number,
+  versionMap?: Map<string, number>,
+  targetPackageName?: string,
+): string[] {
+  const lines: string[] = [];
+  
+  // Sort paths by prefix for efficient merging - O(n log n)
+  allPaths.sort((a, b) => {
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      const aKey = `${a[i]?.package}@${a[i]?.type}`;
+      const bKey = `${b[i]?.package}@${b[i]?.type}`;
+      const cmp = aKey.localeCompare(bKey);
+      if (cmp !== 0) return cmp;
+    }
+    return a.length - b.length;
+  });
+
+  // Track what we've already displayed to enable merging
+  const displayedSegments = new Set<string>();
+  
+  // Process each path - O(n*m) where n=paths, m=avg depth
+  for (let pathIndex = 0; pathIndex < allPaths.length; pathIndex++) {
+    const currentPath = allPaths[pathIndex];
+    if (!currentPath) continue;
+    
+    for (let i = 0; i < currentPath.length; i++) {
+      const step = currentPath[i];
+      if (!step) continue;
+
+      // Create segment key for this position
+      const segmentKey = currentPath.slice(0, i + 1)
+        .map(s => `${s?.package}@${s?.type}`).join("→");
+      
+      // Skip if we've already shown this segment
+      if (displayedSegments.has(segmentKey)) {
+        continue;
+      }
+      displayedSegments.add(segmentKey);
+
+      // Apply compact tree logic
+      const shouldCompact = compactTreeDepth !== undefined && currentPath.length > compactTreeDepth;
+      if (shouldCompact && i > 1 && i < currentPath.length - 2) {
+        continue; // Skip middle segments in compact mode
+      }
+
+      const isLinked = step.specifier.startsWith("link:");
+      const typeCode = isLinked ? "link:" : getTypeShortCode(step.type);
+      
+      // Calculate if this is the last occurrence of this depth across all paths
+      const isLastAtThisDepth = !allPaths.some((otherPath, otherIndex) => 
+        otherIndex > pathIndex && 
+        otherPath.length > i &&
+        otherPath.slice(0, i).every((otherStep, j) => 
+          currentPath[j] && 
+          otherStep.package === currentPath[j]!.package &&
+          otherStep.type === currentPath[j]!.type
+        )
+      );
+      
+      // Generate tree connector
+      const connector = isLastAtThisDepth ? "└─" : "├─";
+      const indentation = "│  ".repeat(i);
+      const prefix = `${basePrefix}    ${indentation}${connector}`;
+      
+      const typeLabel = typeCode ? `(${typeCode})` : "";
+      const isLeaf = i === currentPath.length - 1;
+      let packageName = isLeaf ? versionColor(step.package) : step.package;
+      
+      // Add version number for target - fix the version extraction
+      if (versionMap && isLeaf && targetPackageName) {
+        // Extract version from step.package (e.g., "react@19.1.1" → "19.1.1")
+        const atIndex = step.package.lastIndexOf('@');
+        if (atIndex > 0) {
+          const extractedVersion = step.package.substring(atIndex + 1);
+          const versionKey = `${targetPackageName}@${extractedVersion}`;
+          const versionNum = versionMap.get(versionKey);
+          if (versionNum) {
+            packageName = `${packageName} ${numberColor(`[${versionNum}]`)}`;
+          }
+        }
+      }
+
+      const separator = typeLabel ? "─ " : "── ";
+      lines.push(`${prefix}${typeLabel}${separator}${packageName}`);
+    }
+  }
+  
+  return lines;
+}
+
+function formatDependencyTree(
+  path: DependencyPathStep[],
+  versionColor: (s: string) => string,
+  _useColor: boolean,
+  basePrefix = "",
+  allPaths?: DependencyPathStep[][],
+  compactTreeDepth?: number,
+  versionMap?: Map<string, number>,
+  targetPackageName?: string,
+): string[] {
+  if (path.length === 0) return [];
+
+  const numberColor = _useColor ? chalk.yellow : (s: string) => s;
+
+  // If we have multiple paths, use efficient prefix-based merging
+  if (allPaths && allPaths.length > 1) {
+    return formatPathsWithPrefixMerging(
+      allPaths,
+      versionColor,
+      numberColor,
+      basePrefix,
+      compactTreeDepth,
+      versionMap,
+      targetPackageName,
+    );
+  } else {
+    // Single path logic (keep original fast approach)
+    const lines: string[] = [];
+    const shouldCompact = compactTreeDepth !== undefined && path.length > compactTreeDepth;
+    
+    for (let i = 0; i < path.length; i++) {
+      const step = path[i];
+      if (!step) continue;
+
+      if (shouldCompact && i > 1 && i < path.length - 2) {
+        if (i === 2) {
+          lines.push(`${basePrefix}    │  ...`);
+        }
+        continue;
+      }
+
+      const isLinked = step.specifier.startsWith("link:");
+      const typeCode = isLinked ? "link:" : getTypeShortCode(step.type);
+
+      let prefix = "";
+      if (i === 0) {
+        prefix = i === path.length - 1 ? `${basePrefix}    └─` : `${basePrefix}    ├─`;
+      } else {
+        const isLast = i === path.length - 1;
+        const parentSpacing = `${basePrefix}    ` + "│  ".repeat(i);
+        prefix = isLast ? `${parentSpacing}└─` : `${parentSpacing}├─`;
+      }
+
+      const typeLabel = typeCode ? `(${typeCode})` : "";
+      const isLeaf = i === path.length - 1;
+      let packageName = isLeaf ? versionColor(step.package) : step.package;
+      
+      // Add version number for target - fix the version extraction
+      if (versionMap && isLeaf && targetPackageName) {
+        // Extract version from step.package (e.g., "react@19.1.1" → "19.1.1")
+        const atIndex = step.package.lastIndexOf('@');
+        if (atIndex > 0) {
+          const extractedVersion = step.package.substring(atIndex + 1);
+          const versionKey = `${targetPackageName}@${extractedVersion}`;
+          const versionNum = versionMap.get(versionKey);
+          if (versionNum) {
+            packageName = `${packageName} ${numberColor(`[${versionNum}]`)}`;
+          }
+        }
+      }
+
+      const separator = typeLabel ? "─ " : "── ";
+      lines.push(`${prefix}${typeLabel}${separator}${packageName}`);
+    }
+    
+    return lines;
+  }
 }
 
 export function formatDuplicates(
@@ -353,7 +274,6 @@ export function formatDuplicates(
 
     for (const instance of dup.instances) {
       if (showDependencyTree && instance.dependencyInfo) {
-        // Show dependency tree for each project (similar to per-project mode)
         for (const project of instance.projects) {
           lines.push(`  ${project}:`);
           lines.push(
@@ -370,7 +290,6 @@ export function formatDuplicates(
           );
         }
       } else {
-        // Traditional format with version numbering always enabled
         const typeInfo = instance.dependencyType
           ? ` (${instance.dependencyType})`
           : "";
@@ -389,258 +308,6 @@ export function formatDuplicates(
   }
 
   return lines.join("\n");
-}
-
-/**
- * Convert dependency type to short notation with combination support
- * Examples: od (optional+dependencies), op (optional+peer), oD (optional+dev)
- */
-function getTypeShortCode(type: string, isOptional = false): string {
-  const baseTypeMapping: Record<string, string> = {
-    dependencies: "", // normal dependencies show no indicator
-    devDependencies: "dev",
-    optionalDependencies: "optional",
-    peerDependencies: "peer",
-    transitive: "transitive", // now show explicit transitive indicator
-    file: "file:",
-  };
-
-  // Handle optional combinations
-  if (isOptional && type !== "optionalDependencies") {
-    const baseCode = baseTypeMapping[type] || "";
-    const parts = [baseCode, "optional"].filter(Boolean);
-    return parts.join(",");
-  }
-
-  return baseTypeMapping[type] || "";
-}
-
-/**
- * Format dependency tree in Option 2 style (Compact Tree with Type Labels)
- * Example:
- *   apps/docissue-webapp
- *   ├─(D)─ some-framework@2.1.0
- *   │  └─(d)─ intermediate-lib@1.5.0
- *   │     └─(d)─ next-navigation-guard@0.1.2(next@15.2.1...)
- */
-/**
- * Tree node structure for unified dependency tree
- */
-interface TreeNode {
-  package: string;
-  type: string;
-  specifier: string;
-  children: Map<string, TreeNode>;
-  isTarget: boolean;
-}
-
-/**
- * Build a unified tree structure from multiple dependency paths
- */
-function buildUnifiedTree(allPaths: DependencyPathStep[][]): TreeNode {
-  // Create root node
-  const root: TreeNode = {
-    package: "",
-    type: "",
-    specifier: "",
-    children: new Map(),
-    isTarget: false,
-  };
-
-  // Add each path to the tree
-  for (const path of allPaths) {
-    let currentNode = root;
-    
-    for (let i = 0; i < path.length; i++) {
-      const step = path[i];
-      if (!step) continue;
-
-      const key = `${step.package}@${step.type}`;
-      
-      if (!currentNode.children.has(key)) {
-        currentNode.children.set(key, {
-          package: step.package,
-          type: step.type,
-          specifier: step.specifier,
-          children: new Map(),
-          isTarget: i === path.length - 1,
-        });
-      }
-      
-      currentNode = currentNode.children.get(key)!;
-      // Mark as target if this is the last step in any path
-      if (i === path.length - 1) {
-        currentNode.isTarget = true;
-      }
-    }
-  }
-
-  return root;
-}
-
-/**
- * Format a tree node recursively
- */
-function formatTreeNode(
-  node: TreeNode,
-  versionColor: (s: string) => string,
-  basePrefix: string,
-  isLast = true,
-  compactTreeDepth?: number,
-  versionMap?: Map<string, number>,
-  targetPackageName?: string,
-  numberColor?: (s: string) => string,
-): string[] {
-  const lines: string[] = [];
-  
-  // Don't render the root node itself, just its children
-  if (node.package !== "") {
-    const isLinked = node.specifier.startsWith("link:");
-    let typeCode = "";
-
-    if (isLinked) {
-      typeCode = "link:";
-    } else {
-      typeCode = getTypeShortCode(node.type);
-    }
-
-    // Only show type label if there's a type code
-    const typeLabel = typeCode ? `(${typeCode})` : "";
-    // Only colorize the target package
-    let packageName = node.isTarget ? versionColor(node.package) : node.package;
-    
-    // Add version number if this is the target package (always enabled)
-    if (versionMap && node.isTarget && targetPackageName && numberColor) {
-      // Find the version number for this target package from the version map
-      for (const [versionKey, versionNum] of versionMap.entries()) {
-        if (versionKey.startsWith(`${targetPackageName}@`)) {
-          packageName = `${packageName} ${numberColor(`[${versionNum}]`)}`;
-          break;
-        }
-      }
-    }
-
-    const separator = typeLabel ? "─ " : "── ";
-    const connector = isLast ? "└─" : "├─";
-    lines.push(`${basePrefix}${connector}${typeLabel}${separator}${packageName}`);
-  }
-  
-  const children = Array.from(node.children.values());
-  const nextPrefix = node.package === "" ? basePrefix : (isLast ? `${basePrefix}   ` : `${basePrefix}│  `);
-  
-  // Handle compact tree for deep hierarchies
-  const shouldCompact = compactTreeDepth !== undefined && children.length > compactTreeDepth && node.package !== "";
-  
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i];
-    if (!child) continue;
-    
-    // Skip middle children if compact tree is enabled and we have many children
-    if (shouldCompact && children.length > compactTreeDepth && i > 0 && i < children.length - 1) {
-      if (i === 1) {
-        lines.push(`${nextPrefix}│  ...`);
-      }
-      continue;
-    }
-    
-    const childIsLast = i === children.length - 1;
-    const childPrefix = node.package === "" ? `${nextPrefix}    ` : nextPrefix;
-    
-    lines.push(...formatTreeNode(
-      child, 
-      versionColor, 
-      childPrefix, 
-      childIsLast, 
-      compactTreeDepth, 
-      versionMap, 
-      targetPackageName, 
-      numberColor
-    ));
-  }
-
-  return lines;
-}
-
-function formatDependencyTree(
-  path: DependencyPathStep[],
-  versionColor: (s: string) => string,
-  _useColor: boolean,
-  basePrefix = "",
-  allPaths?: DependencyPathStep[][],
-  compactTreeDepth?: number,
-  versionMap?: Map<string, number>,
-  targetPackageName?: string,
-): string[] {
-  if (path.length === 0) return [];
-
-  const lines: string[] = [];
-  const numberColor = _useColor ? chalk.yellow : (s: string) => s;
-
-  // If we have multiple paths (diamond dependency), build a unified tree
-  if (allPaths && allPaths.length > 1) {
-    const tree = buildUnifiedTree(allPaths);
-    return formatTreeNode(tree, versionColor, basePrefix, true, compactTreeDepth, versionMap, targetPackageName, numberColor);
-  } else {
-    // Original single path logic with compact tree support
-    const shouldCompact = compactTreeDepth !== undefined && path.length > compactTreeDepth;
-    
-    for (let i = 0; i < path.length; i++) {
-      const step = path[i];
-      if (!step) continue;
-
-      // Skip middle sections if compact tree is enabled
-      if (shouldCompact && i > 1 && i < path.length - 2) {
-        if (i === 2) {
-          lines.push(`${basePrefix}    │  ...`);
-        }
-        continue;
-      }
-
-      const isLinked = step.specifier.startsWith("link:");
-      let typeCode = "";
-
-      if (isLinked) {
-        typeCode = "link:";
-      } else {
-        typeCode = getTypeShortCode(step.type);
-      }
-
-      // Determine tree characters based on position with proper depth indentation
-      let prefix = "";
-      if (i === 0) {
-        // First step (after importer)
-        prefix =
-          i === path.length - 1 ? `${basePrefix}    └─` : `${basePrefix}    ├─`;
-      } else {
-        // Intermediate steps with increasing indentation
-        const isLast = i === path.length - 1;
-        const parentSpacing = `${basePrefix}    ` + "│  ".repeat(i);
-        prefix = isLast ? `${parentSpacing}└─` : `${parentSpacing}├─`;
-      }
-
-      // Only show type label if there's a type code
-      const typeLabel = typeCode ? `(${typeCode})` : "";
-      // Only colorize the final leaf package (target)
-      const isLeaf = i === path.length - 1;
-      let packageName = isLeaf ? versionColor(step.package) : step.package;
-      
-      // Add version number if this is the target package (always enabled)
-      if (versionMap && isLeaf && targetPackageName) {
-        // Find the version number for this target package from the version map
-        for (const [versionKey, versionNum] of versionMap.entries()) {
-          if (versionKey.startsWith(`${targetPackageName}@`)) {
-            packageName = `${packageName} ${numberColor(`[${versionNum}]`)}`;
-            break;
-          }
-        }
-      }
-
-      const separator = typeLabel ? "─ " : "── ";
-      lines.push(`${prefix}${typeLabel}${separator}${packageName}`);
-    }
-  }
-
-  return lines;
 }
 
 export function formatPerProjectDuplicates(
@@ -694,7 +361,7 @@ export function formatPerProjectDuplicates(
     }
   }
 
-  // Format each package group (similar to existing format)
+  // Format each package group
   for (const [packageName, importerGroups] of packageGroups.entries()) {
     lines.push(`\n${packageColor(packageName)}:`);
 
@@ -706,10 +373,8 @@ export function formatPerProjectDuplicates(
 
       for (const instance of group.instances) {
         if (showDependencyTree && instance.dependencyInfo) {
-          // Show dependency tree (Option 2 style) only if we have a real path
           const { path } = instance.dependencyInfo;
 
-          // Don't show fake (t) connections - only show real traced paths
           const hasRealPath =
             path.length > 1 ||
             (path.length === 1 && path[0].type !== "transitive");
@@ -739,6 +404,88 @@ export function formatPerProjectDuplicates(
           const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
           lines.push(`    ${displayVersion}`);
         }
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
+// Re-export other required functions that were in the original file
+export function groupByPackage(
+  results: FormattedResult[],
+): Record<string, FormattedResult[]> {
+  const grouped: Record<string, FormattedResult[]> = {};
+
+  for (const result of results) {
+    const packageName = result.packageName;
+    if (!grouped[packageName]) {
+      grouped[packageName] = [];
+    }
+    grouped[packageName]!.push(result);
+  }
+
+  return grouped;
+}
+
+export function formatAsJson(results: FormattedResult[]): string {
+  return JSON.stringify(results, null, 2);
+}
+
+export function formatAsList(results: FormattedResult[]): string {
+  if (results.length === 0) {
+    return "No results found.";
+  }
+
+  const lines: string[] = [];
+
+  for (const result of results) {
+    const packageId = result.version
+      ? `${result.packageName}@${result.version}`
+      : result.packageName;
+
+    const pathStr = result.path.join(" > ");
+
+    let line = `${packageId} - ${pathStr}`;
+
+    if (result.specifier) {
+      line += ` (specifier: ${result.specifier})`;
+    }
+
+    lines.push(line);
+  }
+
+  return lines.join("\n");
+}
+
+export function formatAsTree(
+  results: FormattedResult[],
+  useColor = true,
+): string {
+  if (results.length === 0) {
+    return "No results found.";
+  }
+
+  const lines: string[] = [];
+  const grouped = groupByPackage(results);
+
+  const packageColor = useColor ? chalk.cyan : (s: string) => s;
+  const versionColor = useColor ? chalk.green : (s: string) => s;
+  const specifierColor = useColor ? chalk.yellow : (s: string) => s;
+
+  for (const [packageName, packageResults] of Object.entries(grouped)) {
+    lines.push(`${packageName}`);
+
+    for (const result of packageResults) {
+      const packageId = result.version
+        ? `${result.packageName}@${result.version}`
+        : result.packageName;
+
+      lines.push(`  ${versionColor(packageId)}`);
+      lines.push(`    => ${packageColor(result.path.join(" > "))}`);
+      
+      if (result.specifier) {
+        lines.push(`       specifier: ${specifierColor(result.specifier)}`);
       }
     }
   }
