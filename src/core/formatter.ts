@@ -289,10 +289,36 @@ export function formatDuplicates(
   const versionMap = new Map<string, number>();
   let versionCounter = 1;
 
-  // Always build version mapping (version numbering always enabled)
+  // Build version mapping using the same logic as tree display extraction
   for (const dup of duplicates) {
     for (const instance of dup.instances) {
-      const versionKey = `${dup.packageName}@${instance.version}`;
+      // Extract version using the same logic as formatDependencyTree
+      let extractedVersion = "";
+      
+      if (instance.id.includes("@file:")) {
+        // Handle file: dependencies like "@layerone/bakuraku-fetch@file:packages/..."
+        const fileIndex = instance.id.indexOf("@file:");
+        if (fileIndex > 0) {
+          extractedVersion = instance.id.substring(fileIndex + 1); // "file:packages/..."
+        }
+      } else if (instance.id.includes("@link:")) {
+        // Handle link: dependencies
+        const linkIndex = instance.id.indexOf("@link:");
+        if (linkIndex > 0) {
+          extractedVersion = instance.id.substring(linkIndex + 1); // "link:..."
+        }
+      } else {
+        // Handle standard version dependencies like "react@19.1.1"
+        const atIndex = instance.id.lastIndexOf('@');
+        if (atIndex > 0) {
+          extractedVersion = instance.id.substring(atIndex + 1);
+        } else {
+          // Fallback to instance.version if no @ found
+          extractedVersion = instance.version;
+        }
+      }
+      
+      const versionKey = `${dup.packageName}@${extractedVersion}`;
       if (!versionMap.has(versionKey)) {
         versionMap.set(versionKey, versionCounter++);
       }
@@ -332,7 +358,29 @@ export function formatDuplicates(
           ? ` (${instance.dependencyType})`
           : "";
         
-        const versionKey = `${dup.packageName}@${instance.version}`;
+        // Use the same version extraction logic for consistency
+        let extractedVersion = "";
+        
+        if (instance.id.includes("@file:")) {
+          const fileIndex = instance.id.indexOf("@file:");
+          if (fileIndex > 0) {
+            extractedVersion = instance.id.substring(fileIndex + 1);
+          }
+        } else if (instance.id.includes("@link:")) {
+          const linkIndex = instance.id.indexOf("@link:");
+          if (linkIndex > 0) {
+            extractedVersion = instance.id.substring(linkIndex + 1);
+          }
+        } else {
+          const atIndex = instance.id.lastIndexOf('@');
+          if (atIndex > 0) {
+            extractedVersion = instance.id.substring(atIndex + 1);
+          } else {
+            extractedVersion = instance.version;
+          }
+        }
+        
+        const versionKey = `${dup.packageName}@${extractedVersion}`;
         const versionNum = versionMap.get(versionKey);
         const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
         
@@ -362,11 +410,37 @@ export function formatPerProjectDuplicates(
   const versionMap = new Map<string, number>();
   let versionCounter = 1;
 
-  // Always build version mapping (version numbering always enabled)
+  // Build version mapping using the same logic as tree display extraction
   for (const project of perProjectDuplicates) {
     for (const pkg of project.duplicatePackages) {
       for (const instance of pkg.instances) {
-        const versionKey = `${pkg.packageName}@${instance.version}`;
+        // Extract version using the same logic as formatDependencyTree
+        let extractedVersion = "";
+        
+        if (instance.id.includes("@file:")) {
+          // Handle file: dependencies like "@layerone/bakuraku-fetch@file:packages/..."
+          const fileIndex = instance.id.indexOf("@file:");
+          if (fileIndex > 0) {
+            extractedVersion = instance.id.substring(fileIndex + 1); // "file:packages/..."
+          }
+        } else if (instance.id.includes("@link:")) {
+          // Handle link: dependencies
+          const linkIndex = instance.id.indexOf("@link:");
+          if (linkIndex > 0) {
+            extractedVersion = instance.id.substring(linkIndex + 1); // "link:..."
+          }
+        } else {
+          // Handle standard version dependencies like "react@19.1.1"
+          const atIndex = instance.id.lastIndexOf('@');
+          if (atIndex > 0) {
+            extractedVersion = instance.id.substring(atIndex + 1);
+          } else {
+            // Fallback to instance.version if no @ found
+            extractedVersion = instance.version;
+          }
+        }
+        
+        const versionKey = `${pkg.packageName}@${extractedVersion}`;
         if (!versionMap.has(versionKey)) {
           versionMap.set(versionKey, versionCounter++);
         }
@@ -431,13 +505,57 @@ export function formatPerProjectDuplicates(
               ),
             );
           } else {
-            const versionKey = `${packageName}@${instance.version}`;
+            // Use the same version extraction logic for consistency
+            let extractedVersion = "";
+            
+            if (instance.id.includes("@file:")) {
+              const fileIndex = instance.id.indexOf("@file:");
+              if (fileIndex > 0) {
+                extractedVersion = instance.id.substring(fileIndex + 1);
+              }
+            } else if (instance.id.includes("@link:")) {
+              const linkIndex = instance.id.indexOf("@link:");
+              if (linkIndex > 0) {
+                extractedVersion = instance.id.substring(linkIndex + 1);
+              }
+            } else {
+              const atIndex = instance.id.lastIndexOf('@');
+              if (atIndex > 0) {
+                extractedVersion = instance.id.substring(atIndex + 1);
+              } else {
+                extractedVersion = instance.version;
+              }
+            }
+            
+            const versionKey = `${packageName}@${extractedVersion}`;
             const versionNum = versionMap.get(versionKey);
             const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
             lines.push(`    ${displayVersion}`);
           }
         } else {
-          const versionKey = `${packageName}@${instance.version}`;
+          // Use the same version extraction logic for consistency  
+          let extractedVersion = "";
+          
+          if (instance.id.includes("@file:")) {
+            const fileIndex = instance.id.indexOf("@file:");
+            if (fileIndex > 0) {
+              extractedVersion = instance.id.substring(fileIndex + 1);
+            }
+          } else if (instance.id.includes("@link:")) {
+            const linkIndex = instance.id.indexOf("@link:");
+            if (linkIndex > 0) {
+              extractedVersion = instance.id.substring(linkIndex + 1);
+            }
+          } else {
+            const atIndex = instance.id.lastIndexOf('@');
+            if (atIndex > 0) {
+              extractedVersion = instance.id.substring(atIndex + 1);
+            } else {
+              extractedVersion = instance.version;
+            }
+          }
+          
+          const versionKey = `${packageName}@${extractedVersion}`;
           const versionNum = versionMap.get(versionKey);
           const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
           lines.push(`    ${displayVersion}`);
