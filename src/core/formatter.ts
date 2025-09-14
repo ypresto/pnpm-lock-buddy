@@ -136,12 +136,31 @@ function formatPathsWithPrefixMerging(
       const isLeaf = i === currentPath.length - 1;
       let packageName = isLeaf ? versionColor(step.package) : step.package;
       
-      // Add version number for target - fix the version extraction
+      // Add version number for target - handle file: and link: dependencies
       if (versionMap && isLeaf && targetPackageName) {
-        // Extract version from step.package (e.g., "react@19.1.1" → "19.1.1")
-        const atIndex = step.package.lastIndexOf('@');
-        if (atIndex > 0) {
-          const extractedVersion = step.package.substring(atIndex + 1);
+        let extractedVersion = "";
+        
+        if (step.package.includes("@file:")) {
+          // Handle file: dependencies like "@layerone/bakuraku-fetch@file:packages/..."
+          const fileIndex = step.package.indexOf("@file:");
+          if (fileIndex > 0) {
+            extractedVersion = step.package.substring(fileIndex + 1); // "file:packages/..."
+          }
+        } else if (step.package.includes("@link:")) {
+          // Handle link: dependencies
+          const linkIndex = step.package.indexOf("@link:");
+          if (linkIndex > 0) {
+            extractedVersion = step.package.substring(linkIndex + 1); // "link:..."
+          }
+        } else {
+          // Handle standard version dependencies like "react@19.1.1"
+          const atIndex = step.package.lastIndexOf('@');
+          if (atIndex > 0) {
+            extractedVersion = step.package.substring(atIndex + 1);
+          }
+        }
+        
+        if (extractedVersion) {
           const versionKey = `${targetPackageName}@${extractedVersion}`;
           const versionNum = versionMap.get(versionKey);
           if (versionNum) {
@@ -215,12 +234,31 @@ function formatDependencyTree(
       const isLeaf = i === path.length - 1;
       let packageName = isLeaf ? versionColor(step.package) : step.package;
       
-      // Add version number for target - fix the version extraction
+      // Add version number for target - handle file: and link: dependencies
       if (versionMap && isLeaf && targetPackageName) {
-        // Extract version from step.package (e.g., "react@19.1.1" → "19.1.1")
-        const atIndex = step.package.lastIndexOf('@');
-        if (atIndex > 0) {
-          const extractedVersion = step.package.substring(atIndex + 1);
+        let extractedVersion = "";
+        
+        if (step.package.includes("@file:")) {
+          // Handle file: dependencies like "@layerone/bakuraku-fetch@file:packages/..."
+          const fileIndex = step.package.indexOf("@file:");
+          if (fileIndex > 0) {
+            extractedVersion = step.package.substring(fileIndex + 1); // "file:packages/..."
+          }
+        } else if (step.package.includes("@link:")) {
+          // Handle link: dependencies
+          const linkIndex = step.package.indexOf("@link:");
+          if (linkIndex > 0) {
+            extractedVersion = step.package.substring(linkIndex + 1); // "link:..."
+          }
+        } else {
+          // Handle standard version dependencies like "react@19.1.1"
+          const atIndex = step.package.lastIndexOf('@');
+          if (atIndex > 0) {
+            extractedVersion = step.package.substring(atIndex + 1);
+          }
+        }
+        
+        if (extractedVersion) {
           const versionKey = `${targetPackageName}@${extractedVersion}`;
           const versionNum = versionMap.get(versionKey);
           if (versionNum) {
