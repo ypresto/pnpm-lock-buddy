@@ -63,6 +63,32 @@ function getTypeShortCode(type: string, isOptional = false): string {
  * Ultra-fast path formatting with prefix merging
  * O(n log n) sorting + O(n*m) formatting instead of exponential complexity
  */
+/**
+ * Extract canonical version identifier for version mapping
+ * Handles normalization of link paths and file paths
+ */
+function extractCanonicalVersion(packageId: string, packageName: string): string {
+  if (packageId.includes("@file:")) {
+    // For file dependencies, use the package name as canonical identifier
+    // since they all point to the same local package
+    return `file:${packageName}`;
+  } else if (packageId.includes("@link:")) {
+    // For link dependencies, normalize to canonical package name
+    // Both "link:../bakuraku-fetch" and "link:../../packages/webapp/bakuraku-fetch" 
+    // should map to the same canonical identifier
+    return `link:${packageName}`;
+  } else {
+    // Handle standard version dependencies like "react@19.1.1"
+    const atIndex = packageId.lastIndexOf('@');
+    if (atIndex > 0) {
+      return packageId.substring(atIndex + 1);
+    } else {
+      // Fallback - shouldn't happen in normal cases
+      return packageId;
+    }
+  }
+}
+
 function formatPathsWithPrefixMerging(
   allPaths: DependencyPathStep[][],
   versionColor: (s: string) => string,
@@ -136,36 +162,13 @@ function formatPathsWithPrefixMerging(
       const isLeaf = i === currentPath.length - 1;
       let packageName = isLeaf ? versionColor(step.package) : step.package;
       
-      // Add version number for target - handle file: and link: dependencies
+      // Add version number for target - use canonical version extraction
       if (versionMap && isLeaf && targetPackageName) {
-        let extractedVersion = "";
-        
-        if (step.package.includes("@file:")) {
-          // Handle file: dependencies like "@layerone/bakuraku-fetch@file:packages/..."
-          const fileIndex = step.package.indexOf("@file:");
-          if (fileIndex > 0) {
-            extractedVersion = step.package.substring(fileIndex + 1); // "file:packages/..."
-          }
-        } else if (step.package.includes("@link:")) {
-          // Handle link: dependencies
-          const linkIndex = step.package.indexOf("@link:");
-          if (linkIndex > 0) {
-            extractedVersion = step.package.substring(linkIndex + 1); // "link:..."
-          }
-        } else {
-          // Handle standard version dependencies like "react@19.1.1"
-          const atIndex = step.package.lastIndexOf('@');
-          if (atIndex > 0) {
-            extractedVersion = step.package.substring(atIndex + 1);
-          }
-        }
-        
-        if (extractedVersion) {
-          const versionKey = `${targetPackageName}@${extractedVersion}`;
-          const versionNum = versionMap.get(versionKey);
-          if (versionNum) {
-            packageName = `${packageName} ${numberColor(`[${versionNum}]`)}`;
-          }
+        const canonicalVersion = extractCanonicalVersion(step.package, targetPackageName);
+        const versionKey = `${targetPackageName}@${canonicalVersion}`;
+        const versionNum = versionMap.get(versionKey);
+        if (versionNum) {
+          packageName = `${packageName} ${numberColor(`[${versionNum}]`)}`;
         }
       }
 
@@ -234,36 +237,13 @@ function formatDependencyTree(
       const isLeaf = i === path.length - 1;
       let packageName = isLeaf ? versionColor(step.package) : step.package;
       
-      // Add version number for target - handle file: and link: dependencies
+      // Add version number for target - use canonical version extraction
       if (versionMap && isLeaf && targetPackageName) {
-        let extractedVersion = "";
-        
-        if (step.package.includes("@file:")) {
-          // Handle file: dependencies like "@layerone/bakuraku-fetch@file:packages/..."
-          const fileIndex = step.package.indexOf("@file:");
-          if (fileIndex > 0) {
-            extractedVersion = step.package.substring(fileIndex + 1); // "file:packages/..."
-          }
-        } else if (step.package.includes("@link:")) {
-          // Handle link: dependencies
-          const linkIndex = step.package.indexOf("@link:");
-          if (linkIndex > 0) {
-            extractedVersion = step.package.substring(linkIndex + 1); // "link:..."
-          }
-        } else {
-          // Handle standard version dependencies like "react@19.1.1"
-          const atIndex = step.package.lastIndexOf('@');
-          if (atIndex > 0) {
-            extractedVersion = step.package.substring(atIndex + 1);
-          }
-        }
-        
-        if (extractedVersion) {
-          const versionKey = `${targetPackageName}@${extractedVersion}`;
-          const versionNum = versionMap.get(versionKey);
-          if (versionNum) {
-            packageName = `${packageName} ${numberColor(`[${versionNum}]`)}`;
-          }
+        const canonicalVersion = extractCanonicalVersion(step.package, targetPackageName);
+        const versionKey = `${targetPackageName}@${canonicalVersion}`;
+        const versionNum = versionMap.get(versionKey);
+        if (versionNum) {
+          packageName = `${packageName} ${numberColor(`[${versionNum}]`)}`;
         }
       }
 
@@ -289,36 +269,13 @@ export function formatDuplicates(
   const versionMap = new Map<string, number>();
   let versionCounter = 1;
 
-  // Build version mapping using the same logic as tree display extraction
+  // Build version mapping using canonical version extraction
   for (const dup of duplicates) {
     for (const instance of dup.instances) {
-      // Extract version using the same logic as formatDependencyTree
-      let extractedVersion = "";
+      // Use canonical version extraction to handle different relative paths
+      const canonicalVersion = extractCanonicalVersion(instance.id, dup.packageName);
+      const versionKey = `${dup.packageName}@${canonicalVersion}`;
       
-      if (instance.id.includes("@file:")) {
-        // Handle file: dependencies like "@layerone/bakuraku-fetch@file:packages/..."
-        const fileIndex = instance.id.indexOf("@file:");
-        if (fileIndex > 0) {
-          extractedVersion = instance.id.substring(fileIndex + 1); // "file:packages/..."
-        }
-      } else if (instance.id.includes("@link:")) {
-        // Handle link: dependencies
-        const linkIndex = instance.id.indexOf("@link:");
-        if (linkIndex > 0) {
-          extractedVersion = instance.id.substring(linkIndex + 1); // "link:..."
-        }
-      } else {
-        // Handle standard version dependencies like "react@19.1.1"
-        const atIndex = instance.id.lastIndexOf('@');
-        if (atIndex > 0) {
-          extractedVersion = instance.id.substring(atIndex + 1);
-        } else {
-          // Fallback to instance.version if no @ found
-          extractedVersion = instance.version;
-        }
-      }
-      
-      const versionKey = `${dup.packageName}@${extractedVersion}`;
       if (!versionMap.has(versionKey)) {
         versionMap.set(versionKey, versionCounter++);
       }
@@ -358,29 +315,9 @@ export function formatDuplicates(
           ? ` (${instance.dependencyType})`
           : "";
         
-        // Use the same version extraction logic for consistency
-        let extractedVersion = "";
-        
-        if (instance.id.includes("@file:")) {
-          const fileIndex = instance.id.indexOf("@file:");
-          if (fileIndex > 0) {
-            extractedVersion = instance.id.substring(fileIndex + 1);
-          }
-        } else if (instance.id.includes("@link:")) {
-          const linkIndex = instance.id.indexOf("@link:");
-          if (linkIndex > 0) {
-            extractedVersion = instance.id.substring(linkIndex + 1);
-          }
-        } else {
-          const atIndex = instance.id.lastIndexOf('@');
-          if (atIndex > 0) {
-            extractedVersion = instance.id.substring(atIndex + 1);
-          } else {
-            extractedVersion = instance.version;
-          }
-        }
-        
-        const versionKey = `${dup.packageName}@${extractedVersion}`;
+        // Use canonical version extraction for consistency
+        const canonicalVersion = extractCanonicalVersion(instance.id, dup.packageName);
+        const versionKey = `${dup.packageName}@${canonicalVersion}`;
         const versionNum = versionMap.get(versionKey);
         const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
         
@@ -410,37 +347,14 @@ export function formatPerProjectDuplicates(
   const versionMap = new Map<string, number>();
   let versionCounter = 1;
 
-  // Build version mapping using the same logic as tree display extraction
+  // Build version mapping using canonical version extraction
   for (const project of perProjectDuplicates) {
     for (const pkg of project.duplicatePackages) {
       for (const instance of pkg.instances) {
-        // Extract version using the same logic as formatDependencyTree
-        let extractedVersion = "";
+        // Use canonical version extraction to handle different relative paths
+        const canonicalVersion = extractCanonicalVersion(instance.id, pkg.packageName);
+        const versionKey = `${pkg.packageName}@${canonicalVersion}`;
         
-        if (instance.id.includes("@file:")) {
-          // Handle file: dependencies like "@layerone/bakuraku-fetch@file:packages/..."
-          const fileIndex = instance.id.indexOf("@file:");
-          if (fileIndex > 0) {
-            extractedVersion = instance.id.substring(fileIndex + 1); // "file:packages/..."
-          }
-        } else if (instance.id.includes("@link:")) {
-          // Handle link: dependencies
-          const linkIndex = instance.id.indexOf("@link:");
-          if (linkIndex > 0) {
-            extractedVersion = instance.id.substring(linkIndex + 1); // "link:..."
-          }
-        } else {
-          // Handle standard version dependencies like "react@19.1.1"
-          const atIndex = instance.id.lastIndexOf('@');
-          if (atIndex > 0) {
-            extractedVersion = instance.id.substring(atIndex + 1);
-          } else {
-            // Fallback to instance.version if no @ found
-            extractedVersion = instance.version;
-          }
-        }
-        
-        const versionKey = `${pkg.packageName}@${extractedVersion}`;
         if (!versionMap.has(versionKey)) {
           versionMap.set(versionKey, versionCounter++);
         }
@@ -505,57 +419,17 @@ export function formatPerProjectDuplicates(
               ),
             );
           } else {
-            // Use the same version extraction logic for consistency
-            let extractedVersion = "";
-            
-            if (instance.id.includes("@file:")) {
-              const fileIndex = instance.id.indexOf("@file:");
-              if (fileIndex > 0) {
-                extractedVersion = instance.id.substring(fileIndex + 1);
-              }
-            } else if (instance.id.includes("@link:")) {
-              const linkIndex = instance.id.indexOf("@link:");
-              if (linkIndex > 0) {
-                extractedVersion = instance.id.substring(linkIndex + 1);
-              }
-            } else {
-              const atIndex = instance.id.lastIndexOf('@');
-              if (atIndex > 0) {
-                extractedVersion = instance.id.substring(atIndex + 1);
-              } else {
-                extractedVersion = instance.version;
-              }
-            }
-            
-            const versionKey = `${packageName}@${extractedVersion}`;
+            // Use canonical version extraction for consistency
+            const canonicalVersion = extractCanonicalVersion(instance.id, packageName);
+            const versionKey = `${packageName}@${canonicalVersion}`;
             const versionNum = versionMap.get(versionKey);
             const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
             lines.push(`    ${displayVersion}`);
           }
         } else {
-          // Use the same version extraction logic for consistency  
-          let extractedVersion = "";
-          
-          if (instance.id.includes("@file:")) {
-            const fileIndex = instance.id.indexOf("@file:");
-            if (fileIndex > 0) {
-              extractedVersion = instance.id.substring(fileIndex + 1);
-            }
-          } else if (instance.id.includes("@link:")) {
-            const linkIndex = instance.id.indexOf("@link:");
-            if (linkIndex > 0) {
-              extractedVersion = instance.id.substring(linkIndex + 1);
-            }
-          } else {
-            const atIndex = instance.id.lastIndexOf('@');
-            if (atIndex > 0) {
-              extractedVersion = instance.id.substring(atIndex + 1);
-            } else {
-              extractedVersion = instance.version;
-            }
-          }
-          
-          const versionKey = `${packageName}@${extractedVersion}`;
+          // Use canonical version extraction for consistency  
+          const canonicalVersion = extractCanonicalVersion(instance.id, packageName);
+          const versionKey = `${packageName}@${canonicalVersion}`;
           const versionNum = versionMap.get(versionKey);
           const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
           lines.push(`    ${displayVersion}`);
