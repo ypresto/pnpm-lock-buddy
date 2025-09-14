@@ -576,10 +576,81 @@ function formatDependencyTree(
   const lines: string[] = [];
   const numberColor = _useColor ? chalk.yellow : (s: string) => s;
 
+  // Performance optimization: Limit the number of paths we process
+  const MAX_PATHS_TO_SHOW = 5;
+  const MAX_PATHS_FOR_UNIFIED_TREE = 3; // Reduced from 10
+  
   // If we have multiple paths (diamond dependency), build a unified tree
-  if (allPaths && allPaths.length > 1) {
+  if (allPaths && allPaths.length > 1 && allPaths.length <= MAX_PATHS_FOR_UNIFIED_TREE) {
     const tree = buildUnifiedTree(allPaths);
     return formatTreeNode(tree, versionColor, basePrefix, true, compactTreeDepth, versionMap, targetPackageName, numberColor);
+  } else if (allPaths && allPaths.length > 1) {
+    // Multiple paths - use simplified separate path approach for performance
+    const pathsToShow = Math.min(allPaths.length, MAX_PATHS_TO_SHOW);
+    
+    for (let pathIndex = 0; pathIndex < pathsToShow; pathIndex++) {
+      const currentPath = allPaths[pathIndex];
+      if (!currentPath) continue;
+
+      // Add spacing between paths (except before the first one)
+      if (pathIndex > 0) {
+        lines.push(`${basePrefix}    │`);
+      }
+
+      // Show path indicator if we're limiting paths
+      if (pathIndex === 0 && allPaths.length > MAX_PATHS_TO_SHOW) {
+        lines.push(`${basePrefix}    │  (showing ${MAX_PATHS_TO_SHOW} of ${allPaths.length} paths)`);
+      }
+
+      // Simplified path rendering - limit depth to prevent exponential complexity
+      const maxDepthToShow = 4; // Limit depth regardless of compactTreeDepth
+      const pathToShow = currentPath.slice(0, maxDepthToShow);
+      const wasPathTruncated = currentPath.length > maxDepthToShow;
+
+      for (let i = 0; i < pathToShow.length; i++) {
+        const step = pathToShow[i];
+        if (!step) continue;
+
+        const isLinked = step.specifier.startsWith("link:");
+        const typeCode = isLinked ? "link:" : getTypeShortCode(step.type);
+
+        // Simplified prefix calculation
+        const isLast = i === pathToShow.length - 1 && !wasPathTruncated;
+        const prefix = i === 0 
+          ? (isLast ? `${basePrefix}    └─` : `${basePrefix}    ├─`)
+          : (isLast ? `${basePrefix}    ${"│  ".repeat(i)}└─` : `${basePrefix}    ${"│  ".repeat(i)}├─`);
+
+        const typeLabel = typeCode ? `(${typeCode})` : "";
+        let packageName = step.package;
+        
+        // Only colorize and add version numbers to the final step
+        if (isLast && !wasPathTruncated) {
+          packageName = versionColor(packageName);
+          
+          if (versionMap && targetPackageName) {
+            for (const [versionKey, versionNum] of versionMap.entries()) {
+              if (versionKey.startsWith(`${targetPackageName}@`)) {
+                packageName = `${packageName} ${numberColor(`[${versionNum}]`)}`;
+                break;
+              }
+            }
+          }
+        }
+
+        const separator = typeLabel ? "─ " : "── ";
+        lines.push(`${prefix}${typeLabel}${separator}${packageName}`);
+      }
+
+      // Add ellipsis if path was truncated
+      if (wasPathTruncated) {
+        lines.push(`${basePrefix}    ${"│  ".repeat(maxDepthToShow)}└─ ... (${currentPath.length - maxDepthToShow} more levels)`);
+      }
+    }
+
+    // Show summary if there are many more paths
+    if (allPaths.length > MAX_PATHS_TO_SHOW) {
+      lines.push(`${basePrefix}    └─ ... (${allPaths.length - MAX_PATHS_TO_SHOW} more paths)`);
+    }
   } else {
     // Original single path logic with compact tree support
     const shouldCompact = compactTreeDepth !== undefined && path.length > compactTreeDepth;
