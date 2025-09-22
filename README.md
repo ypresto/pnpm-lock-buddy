@@ -1,6 +1,17 @@
-# pnpm-lock-buddy
+# pnpm-lock-search
 
-CLI tool for analyzing pnpm-lock.yaml files. Search for packages, detect duplicates, and understand dependency relationships in your monorepo.
+A powerful tool for analyzing dependency duplicates and workspace conflicts in pnpm-lock.yaml files. Designed for large monorepos to detect critical runtime issues and bundle bloat.
+
+## Why This Tool?
+
+Large monorepos often suffer from:
+- 🚨 **Runtime module conflicts** from the same package loaded multiple ways  
+- 📦 **Bundle bloat** from duplicate packages with different versions
+- 🔗 **Workspace link issues** causing `link:` vs `file:` resolution conflicts
+- 🤔 **Complex dependency chains** that are hard to trace
+- ⚡ **TypeScript ESLint conflicts** from different plugin versions
+
+This tool reveals exactly **how** and **why** duplicates exist, with actionable dependency paths.
 
 ## Installation
 
@@ -141,6 +152,106 @@ pnpm-lock-buddy duplicates --per-project --exit-code
 - ✅ **Multiple output formats** (tree, JSON, list)
 - ✅ **Project filtering** for monorepo analysis
 - ✅ **Package validation** with helpful error messages
+
+## Real-World Use Cases
+
+### 🚨 Critical: Detect Dual Resolution Conflicts
+
+**Problem:** Same package loaded via both `link:` and `file:` mechanisms causing runtime errors.
+
+```bash
+# Detect critical conflicts
+node dist/cli/index.js duplicates --per-project "@layerone/bakuraku-fetch"
+```
+
+**Output:**
+```
+@layerone/bakuraku-fetch:
+  apps/payer-nextjs-webapp: has 2 instances
+    @layerone/bakuraku-fetch@file:packages/webapp/bakuraku-fetch(react@18.2.0)  ← Via snapshots
+    @layerone/bakuraku-fetch@link:../../packages/webapp/bakuraku-fetch           ← Via importers
+```
+
+**Solution:** Remove redundant direct links where packages are already transitively available.
+
+### 🔍 Find Root Cause of Version Conflicts
+
+**Problem:** Different ESLint plugins bringing conflicting TypeScript ESLint versions.
+
+```bash
+# Trace dependency chains  
+node dist/cli/index.js duplicates --per-project --deps @typescript-eslint/types
+```
+
+**Output:**
+```
+@typescript-eslint/types:
+  packages/shared/eslint-config: has 2 instances
+    packages/shared/eslint-config
+    ├─(D)─ eslint-plugin-storybook@9.0.7(...)
+    │  │  │  └─(d)─ @typescript-eslint/types@8.38.0  ← v8.38.0 via storybook
+    
+    packages/shared/eslint-config  
+    ├─(D)─ eslint-plugin-import@2.32.0(...)
+    │  │  │  └─(d)─ @typescript-eslint/types@8.39.0  ← v8.39.0 via import
+```
+
+**Solution:** Update `eslint-plugin-storybook` to align with `eslint-plugin-import` version.
+
+### 🎯 Focus on Production Dependencies
+
+**Problem:** Too many dev dependency duplicates cluttering analysis.
+
+```bash
+# Show only production dependencies
+node dist/cli/index.js duplicates --per-project --omit=dev --omit=optional
+```
+
+**Output:**
+```
+react:
+  apps/web: has 2 instances  
+    react@18.2.0 (d)
+    react@19.1.1 (d)  ← Critical production conflict!
+```
+
+### 🔎 Find Packages by Pattern
+
+**Problem:** Need to check all React or AWS SDK related duplicates.
+
+```bash
+# Wildcard patterns
+node dist/cli/index.js duplicates --per-project "react*"      # All React packages
+node dist/cli/index.js duplicates --per-project "@types/*"   # All TypeScript types  
+node dist/cli/index.js duplicates --per-project "*eslint*"   # All ESLint packages
+```
+
+### 📊 Project-Specific Analysis
+
+**Problem:** Investigate duplicates in specific apps or packages.
+
+```bash
+# Focus on specific project with dependency trees
+node dist/cli/index.js duplicates --per-project --deps --project apps/web lodash
+
+# Global view with project filtering
+node dist/cli/index.js duplicates --deps --project apps/web -- react-hook-form
+```
+
+### Dependency Type Indicators
+
+- **`(d)`** = dependencies | **`(D)`** = devDependencies | **`(o)`** = optionalDependencies
+- **`(p)`** = peerDependencies | **`(L)`** = linked dependency | **`(t)`** = transitive
+
+### Advanced Options
+
+```bash
+# Customize dependency tree depth
+node dist/cli/index.js duplicates --per-project --deps --max-depth 5
+
+# JSON output for tooling integration
+node dist/cli/index.js duplicates --per-project --output=json
+```
 
 ## License
 
