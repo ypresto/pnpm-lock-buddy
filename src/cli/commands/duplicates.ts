@@ -29,8 +29,12 @@ export function createDuplicatesCommand(): Command {
       'Omit dependency types: "dev", "optional", "peer" (e.g., --omit=dev --omit=optional)',
     )
     .option(
-      "--deps [depth]",
-      "Show dependency tree paths from root to target packages. Optional depth number limits tree display (e.g., --deps=3 shows max 3 levels with '...' for deeper paths)",
+      "--deps",
+      "Show dependency tree paths from root to target packages",
+    )
+    .option(
+      "--deps-depth <number>",
+      "Limit dependency tree display depth (e.g., --deps-depth=3 shows max 3 levels with '...' for deeper paths)",
     )
     .option(
       "--max-depth <number>",
@@ -44,31 +48,9 @@ export function createDuplicatesCommand(): Command {
     .option("-o, --output <format>", "Output format: tree, json", "tree")
     .action((packageNames: string[], options) => {
       try {
-        // Parse deps option
-        let showDependencyTree = false;
-        let compactTreeDepth: number | undefined = undefined;
-        
-        if (options.deps !== undefined) {
-          showDependencyTree = true;
-
-          // Handle --deps=n format
-          if (typeof options.deps === "string" && options.deps !== "" && !isNaN(Number(options.deps))) {
-            compactTreeDepth = Number(options.deps);
-          } else if (typeof options.deps === "number") {
-            compactTreeDepth = options.deps;
-          } else if (typeof options.deps === "string" && options.deps !== "" && isNaN(Number(options.deps))) {
-            // --deps consumed what looks like a package name
-            console.error(
-              chalk.yellow(
-                `Warning: It looks like "--deps" consumed "${options.deps}" as its value.\n` +
-                `If "${options.deps}" is a package name, use one of these formats:\n` +
-                `  • Place package names before options: duplicates ${options.deps} --deps\n` +
-                `  • Use -- separator: duplicates --deps -- ${options.deps}\n` +
-                `  • Use explicit depth: duplicates --deps=3 ${options.deps}\n`
-              )
-            );
-          }
-        }
+        // Parse deps options
+        const showDependencyTree = options.deps === true;
+        const compactTreeDepth = options.depsDepth ? Number(options.depsDepth) : undefined;
 
         // Load lockfile
         const lockfile = loadLockfile(options.file);
