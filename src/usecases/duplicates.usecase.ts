@@ -277,7 +277,7 @@ export class DuplicatesUsecase {
     // Get global duplicates first (with same filtering)
     const globalDuplicates = this.findDuplicates(options);
 
-    // Group by importer
+    // Group by importer, but treat file variants as separate importers
     const importerGroups = new Map<string, DuplicateInstance[]>();
 
     for (const duplicate of globalDuplicates) {
@@ -289,13 +289,27 @@ export class DuplicatesUsecase {
             continue;
           }
 
-          if (!importerGroups.has(project)) {
-            importerGroups.set(project, []);
+          // Check if this instance comes through a file variant
+          let projectKey = project;
+          if (instance.dependencyInfo && instance.dependencyInfo.path.length > 0) {
+            // Look for file variant in the dependency path
+            const fileVariantStep = instance.dependencyInfo.path.find(step => 
+              step.package.includes('@file:')
+            );
+            
+            if (fileVariantStep) {
+              // Use the file variant package as the project key
+              projectKey = fileVariantStep.package;
+            }
+          }
+
+          if (!importerGroups.has(projectKey)) {
+            importerGroups.set(projectKey, []);
           }
 
           // Check if this package already exists in this importer's duplicates
           let existingPackage = importerGroups
-            .get(project)!
+            .get(projectKey)!
             .find((pkg) => pkg.packageName === duplicate.packageName);
 
           if (!existingPackage) {
@@ -303,14 +317,34 @@ export class DuplicatesUsecase {
               packageName: duplicate.packageName,
               instances: [],
             };
-            importerGroups.get(project)!.push(existingPackage);
+            importerGroups.get(projectKey)!.push(existingPackage);
           }
 
           // Add this instance if not already present
           if (
             !existingPackage.instances.find((inst) => inst.id === instance.id)
           ) {
-            existingPackage.instances.push(instance);
+            // For file variant entries, modify the dependency info to show the target as child
+            let modifiedInstance = instance;
+            if (projectKey.includes('@file:')) {
+              modifiedInstance = {
+                ...instance,
+                dependencyInfo: {
+                  typeSummary: instance.dependencyInfo?.typeSummary || 'dependencies',
+                  path: [{
+                    package: instance.id,
+                    type: instance.dependencyInfo?.path.find(step =>
+                      step.package.includes('@file:')
+                    )?.type || 'dependencies',
+                    specifier: instance.dependencyInfo?.path.find(step =>
+                      step.package === instance.id
+                    )?.specifier || instance.id
+                  }],
+                  allPaths: instance.dependencyInfo?.allPaths
+                }
+              };
+            }
+            existingPackage.instances.push(modifiedInstance);
           }
         }
       }
@@ -353,7 +387,7 @@ export class DuplicatesUsecase {
             id: inst.id,
             version: inst.version,
             dependencies: inst.dependencies,
-            dependencyInfo: this.getInstanceDependencyInfo(
+            dependencyInfo: inst.dependencyInfo || this.getInstanceDependencyInfo(
               importerPath,
               packageName,
               inst.id,
