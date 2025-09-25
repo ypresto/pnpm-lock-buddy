@@ -390,11 +390,12 @@ export class DependencyTracker {
   getAllDependencyPaths(
     importerPath: string,
     packageId: string,
+    maxDepth: number = 10,
   ): DependencyPathStep[][] {
     this.initialize();
 
     // Build all paths using unified logic
-    const paths = this.buildAllUnifiedPaths(importerPath, packageId);
+    const paths = this.buildAllUnifiedPaths(importerPath, packageId, maxDepth);
     return paths;
   }
 
@@ -404,6 +405,7 @@ export class DependencyTracker {
   private buildAllUnifiedPaths(
     importerPath: string,
     packageId: string,
+    maxDepth: number = 10,
   ): DependencyPathStep[][] {
     const importerData = this.lockfile.importers[importerPath];
     if (!importerData) return [];
@@ -436,6 +438,7 @@ export class DependencyTracker {
       importerPath,
       packageName,
       packageId,
+      maxDepth,
     );
     allPaths.push(...transitivePaths);
 
@@ -555,6 +558,7 @@ export class DependencyTracker {
     importerPath: string,
     packageName: string,
     packageId: string,
+    maxDepth: number = 10,
   ): DependencyPathStep[][] {
     const importerData = this.lockfile.importers[importerPath];
     if (!importerData) return [];
@@ -563,9 +567,9 @@ export class DependencyTracker {
     const cache = new Map<string, DependencyPathStep[][]>();
     const globalVisited = new Set<string>();
     
-    // AGGRESSIVE performance limits for large monorepos
-    const MAX_TOTAL_PATHS = 10; // Reduced from 50
-    const MAX_DIRECT_DEPS_TO_CHECK = 20; // Don't check all direct deps
+    // Performance limits for large monorepos (adjusted based on maxDepth)
+    const MAX_TOTAL_PATHS = Math.min(50, maxDepth * 5); // Scale with depth
+    const MAX_DIRECT_DEPS_TO_CHECK = Math.min(100, maxDepth * 10); // Scale with depth
 
     // Get all direct dependencies of the importer
     const allDirectDeps = {
@@ -596,13 +600,13 @@ export class DependencyTracker {
         directSnapshotId = `${directDepName}@${directDepInfo.version}`;
       }
 
-      // Use shared visited set and aggressive depth limiting
+      // Use shared visited set with configurable depth limiting
       const paths = this.findAllPathsThroughSnapshot(
         directSnapshotId,
         packageName,
         packageId,
         globalVisited,
-        3, // Reduced from 5 for faster execution
+        Math.max(3, Math.min(maxDepth - 1, 20)), // Use maxDepth but cap at reasonable limit
         cache,
       );
 

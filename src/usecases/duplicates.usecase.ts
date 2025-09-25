@@ -221,6 +221,7 @@ export class DuplicatesUsecase {
                 firstProject,
                 packageName,
                 instance.id,
+                options.maxDepth || 10,
               );
             }
           }
@@ -335,6 +336,7 @@ export class DuplicatesUsecase {
                 importerPath,
                 pkg.packageName,
                 inst.id,
+                options.maxDepth || 10,
               ),
             })),
           }))
@@ -409,6 +411,7 @@ export class DuplicatesUsecase {
     importerPath: string,
     _packageName: string,
     instanceId: string,
+    maxDepth: number = 10,
   ): DependencyInfo {
     const path = this.dependencyTracker.getDependencyPath(
       importerPath,
@@ -419,6 +422,7 @@ export class DuplicatesUsecase {
     const allPaths = this.dependencyTracker.getAllDependencyPaths(
       importerPath,
       instanceId,
+      maxDepth,
     );
 
     const typeSummary =
