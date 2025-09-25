@@ -58,6 +58,24 @@ export function createDuplicatesCommand(): Command {
         // Create usecase
         const duplicatesUsecase = new DuplicatesUsecase(lockfile);
 
+        // Validate project filter if specified
+        if (options.project && options.project.length > 0) {
+          const availableProjects = Object.keys(lockfile.importers || {});
+          const missingProjects = options.project.filter(
+            (project: string) => !availableProjects.includes(project)
+          );
+
+          if (missingProjects.length > 0) {
+            console.error(
+              chalk.red(
+                `Error: Project${missingProjects.length > 1 ? "s" : ""} not found: ${missingProjects.join(", ")}\n` +
+                `Available projects:\n${availableProjects.map(p => `  - ${p}`).join("\n")}`
+              )
+            );
+            process.exit(1);
+          }
+        }
+
         // Check if non-wildcard packages exist
         if (packageNames.length > 0) {
           const nonWildcardNames = packageNames.filter(
