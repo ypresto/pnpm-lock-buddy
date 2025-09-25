@@ -80,6 +80,137 @@ export class DuplicatesUsecase {
   }
 
   /**
+   * Ensure all instances have complete dependency info
+   */
+  private enrichInstancesWithDependencyInfo(
+    duplicates: DuplicateInstance[],
+    options: DuplicatesOptions
+  ): DuplicateInstance[] {
+    return duplicates.map(duplicate => ({
+      ...duplicate,
+      instances: duplicate.instances.map(instance => {
+        // If dependency info is missing or incomplete, generate it
+        if (!instance.dependencyInfo || !instance.dependencyInfo.path || instance.dependencyInfo.path.length === 0) {
+          const firstProject = instance.projects[0];
+          if (firstProject) {
+            return {
+              ...instance,
+              dependencyInfo: this.getInstanceDependencyInfo(
+                firstProject,
+                duplicate.packageName,
+                instance.id,
+                options.maxDepth || 10
+              )
+            };
+          }
+        }
+        return instance;
+      })
+    }));
+  }
+
+  /**
+   * Detect file variant project key using multiple methods
+   */
+  private detectFileVariantProjectKey(
+    instance: any,
+    project: string,
+    packageName: string
+  ): string {
+    // Method 1: Check dependency path
+    const fileVariantFromPath = this.detectFromDependencyPath(instance.dependencyInfo);
+    if (fileVariantFromPath) return fileVariantFromPath;
+    
+    // Method 2: Check instance ID patterns
+    const fileVariantFromId = this.detectFromInstanceId(instance.id, project);
+    if (fileVariantFromId) return fileVariantFromId;
+    
+    // Method 3: Direct lockfile analysis
+    const fileVariantFromLockfile = this.detectFromLockfile(instance, project, packageName);
+    if (fileVariantFromLockfile) return fileVariantFromLockfile;
+    
+    // Fallback: regular project
+    return project;
+  }
+
+  /**
+   * Detect file variant from dependency path
+   */
+  private detectFromDependencyPath(dependencyInfo: any): string | null {
+    if (!dependencyInfo?.path) return null;
+    
+    const fileVariantStep = dependencyInfo.path.find((step: any) => 
+      step.package.includes('@file:')
+    );
+    
+    return fileVariantStep ? fileVariantStep.package : null;
+  }
+
+  /**
+   * Detect file variant from instance ID patterns
+   */
+  private detectFromInstanceId(instanceId: string, _project: string): string | null {
+    // If the instance ID itself contains file: reference
+    if (instanceId.includes('@file:')) {
+      return instanceId;
+    }
+    return null;
+  }
+
+  /**
+   * Detect file variant from direct lockfile analysis
+   */
+  private detectFromLockfile(
+    instance: any,
+    project: string,
+    packageName: string
+  ): string | null {
+    const importerName = this.getPackageNameFromImporterPath(project);
+    if (!importerName) return null;
+
+    const filePrefix = `${importerName}@file:${project}`;
+
+    // Check packages section
+    for (const [pkgKey, pkgData] of Object.entries(this.lockfile.packages || {})) {
+      if (pkgKey.startsWith(filePrefix)) {
+        const deps = { ...pkgData.dependencies, ...pkgData.optionalDependencies };
+        if (deps[packageName] === instance.id || 
+            deps[packageName] === parsePackageString(instance.id).version) {
+          return pkgKey;
+        }
+      }
+    }
+
+    // Check snapshots section  
+    for (const [snapKey, snapData] of Object.entries(this.lockfile.snapshots || {})) {
+      if (snapKey.startsWith(filePrefix)) {
+        const deps = { ...snapData.dependencies, ...snapData.optionalDependencies };
+        if (deps[packageName] === instance.id ||
+            deps[packageName] === parsePackageString(instance.id).version) {
+          return snapKey;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get package name from importer path
+   */
+  private getPackageNameFromImporterPath(importerPath: string): string | null {
+    // Look for the package.json name for this importer
+    // For now, use a simple heuristic based on path
+    if (importerPath.includes("packages/webapp/")) {
+      const parts = importerPath.split("/");
+      const packageName = parts[parts.length - 1];
+      // Convert to scoped package name
+      return `@layerone/${packageName}`;
+    }
+    return null;
+  }
+
+  /**
    * Find packages that have multiple instances with different dependencies
    */
   findDuplicates(options: DuplicatesOptions = {}): DuplicateInstance[] {
@@ -277,10 +408,13 @@ export class DuplicatesUsecase {
     // Get global duplicates first (with same filtering)
     const globalDuplicates = this.findDuplicates(options);
 
-    // Group by importer, but treat file variants as separate importers
+    // Phase 1: Ensure all instances have complete dependency info
+    const enrichedDuplicates = this.enrichInstancesWithDependencyInfo(globalDuplicates, options);
+
+    // Phase 2: Group by importer with robust file variant detection
     const importerGroups = new Map<string, DuplicateInstance[]>();
 
-    for (const duplicate of globalDuplicates) {
+    for (const duplicate of enrichedDuplicates) {
       for (const instance of duplicate.instances) {
         // For each project where this instance is used
         for (const project of instance.projects) {
@@ -289,19 +423,12 @@ export class DuplicatesUsecase {
             continue;
           }
 
-          // Check if this instance comes through a file variant
-          let projectKey = project;
-          if (instance.dependencyInfo && instance.dependencyInfo.path.length > 0) {
-            // Look for file variant in the dependency path
-            const fileVariantStep = instance.dependencyInfo.path.find(step => 
-              step.package.includes('@file:')
-            );
-            
-            if (fileVariantStep) {
-              // Use the file variant package as the project key
-              projectKey = fileVariantStep.package;
-            }
-          }
+          // Use robust multi-method file variant detection
+          const projectKey = this.detectFileVariantProjectKey(
+            instance,
+            project,
+            duplicate.packageName
+          );
 
           if (!importerGroups.has(projectKey)) {
             importerGroups.set(projectKey, []);
@@ -324,23 +451,23 @@ export class DuplicatesUsecase {
           if (
             !existingPackage.instances.find((inst) => inst.id === instance.id)
           ) {
-            // For file variant entries, modify the dependency info to show the target as child
+            // For file variant entries, modify the dependency info to show clean direct dependency
             let modifiedInstance = instance;
             if (projectKey.includes('@file:')) {
+              const fileVariantType = instance.dependencyInfo?.path.find(step =>
+                step.package.includes('@file:')
+              )?.type || 'dependencies';
+
               modifiedInstance = {
                 ...instance,
                 dependencyInfo: {
-                  typeSummary: instance.dependencyInfo?.typeSummary || 'dependencies',
+                  typeSummary: fileVariantType,
                   path: [{
                     package: instance.id,
-                    type: instance.dependencyInfo?.path.find(step =>
-                      step.package.includes('@file:')
-                    )?.type || 'dependencies',
-                    specifier: instance.dependencyInfo?.path.find(step =>
-                      step.package === instance.id
-                    )?.specifier || instance.id
+                    type: fileVariantType,
+                    specifier: instance.id
                   }],
-                  allPaths: instance.dependencyInfo?.allPaths
+                  allPaths: undefined // Clear to avoid complex tree
                 }
               };
             }
@@ -350,7 +477,7 @@ export class DuplicatesUsecase {
       }
     }
 
-    // Convert to PerProjectDuplicate format and filter for actual duplicates
+    // Phase 3: Convert to PerProjectDuplicate format and filter for actual duplicates
     const results: PerProjectDuplicate[] = [];
 
     for (const [importerPath, packages] of importerGroups.entries()) {
