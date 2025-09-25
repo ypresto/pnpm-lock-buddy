@@ -423,6 +423,17 @@ export class DependencyTracker {
       allPaths.push(directPath);
     }
 
+    // 1b. Check if it's a dependency through a file: variant of the same importer
+    // This handles cases where workspace packages have peer dep variants
+    const fileVariantPath = this.checkFileVariantDependency(
+      importerPath,
+      packageName,
+      packageId,
+    );
+    if (fileVariantPath) {
+      allPaths.push(fileVariantPath);
+    }
+
     // 2. Check if it comes through linked dependencies
     const linkedPath = this.checkLinkedDependencyPath(
       importerPath,
@@ -451,6 +462,67 @@ export class DependencyTracker {
 
     // Remove duplicate paths (same sequence of packages)
     return this.deduplicatePaths(allPaths);
+  }
+
+  /**
+   * Check if dependency comes through a file: variant of the same importer
+   */
+  private checkFileVariantDependency(
+    importerPath: string,
+    packageName: string,
+    packageId: string,
+  ): DependencyPathStep[] | null {
+    // Get the package name for this importer path
+    // e.g., packages/webapp/foundation-react -> @layerone/foundation-react
+    const importerName = this.getPackageNameFromImporterPath(importerPath);
+    if (!importerName) {
+      return null;
+    }
+
+    // Look for file: variants of this package in the packages section
+    const filePrefix = `${importerName}@file:${importerPath}`;
+
+    // Check all package entries that start with this prefix
+    for (const [pkgKey, pkgData] of Object.entries(this.lockfile.packages || {})) {
+      if (pkgKey.startsWith(filePrefix)) {
+        // Check if this variant has the dependency we're looking for
+        const depTypes = [
+          { deps: pkgData.dependencies, type: "dependencies" },
+          { deps: pkgData.optionalDependencies, type: "optionalDependencies" },
+        ];
+
+        for (const { deps, type } of depTypes) {
+          if (deps?.[packageName] === packageId ||
+              deps?.[packageName] === parsePackageString(packageId).version) {
+            // Found it! Return path showing the full package variant name
+            return [
+              {
+                package: pkgKey, // Use the full package key with peer deps
+                type,
+                specifier: pkgKey,
+              },
+            ];
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get package name from importer path
+   */
+  private getPackageNameFromImporterPath(importerPath: string): string | null {
+    // Look for the package.json name for this importer
+    // For now, use a simple heuristic based on path
+    if (importerPath.includes("packages/webapp/")) {
+      const parts = importerPath.split("/");
+      const packageName = parts[parts.length - 1];
+      // Convert to scoped package name
+      return `@layerone/${packageName}`;
+    }
+    return null;
   }
 
   /**
