@@ -494,13 +494,18 @@ export class DependencyTracker {
         for (const { deps, type } of depTypes) {
           if (deps?.[packageName] === packageId ||
               deps?.[packageName] === parsePackageString(packageId).version) {
-            // Found it! Return path showing the full package variant name
+            // Found it! Return path showing the file variant as parent and target as child
             return [
               {
-                package: pkgKey, // Use the full package key with peer deps
+                package: pkgKey, // Use the full package key with peer deps as parent
                 type,
                 specifier: pkgKey,
               },
+              {
+                package: packageId, // Target package as child
+                type,
+                specifier: deps[packageName],
+              }
             ];
           }
         }
@@ -520,13 +525,18 @@ export class DependencyTracker {
         for (const { deps, type } of depTypes) {
           if (deps?.[packageName] === packageId ||
               deps?.[packageName] === parsePackageString(packageId).version) {
-            // Found it! Return path showing the full snapshot key
+            // Found it! Return path showing the snapshot as parent and target as child
             return [
               {
-                package: snapKey, // Use the full snapshot key with peer deps
+                package: snapKey, // Use the full snapshot key with peer deps as parent
+                type,
+                specifier: snapKey,
+              },
+              {
+                package: packageId, // Target package as child
                 type,
                 specifier: deps[packageName],
-              },
+              }
             ];
           }
         }

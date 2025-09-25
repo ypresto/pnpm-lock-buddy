@@ -320,50 +320,86 @@ export class DuplicatesUsecase {
     const results: PerProjectDuplicate[] = [];
 
     for (const [importerPath, packages] of importerGroups.entries()) {
-      const duplicatePackages = packages.filter(
-        (pkg) => pkg.instances.length > 1 || options.showAll,
-      );
+      // Within each project, group packages by name and check if any package has multiple versions
+      const packagesByName = new Map<string, any[]>();
+      
+      for (const pkg of packages) {
+        if (!packagesByName.has(pkg.packageName)) {
+          packagesByName.set(pkg.packageName, []);
+        }
+        packagesByName.get(pkg.packageName)!.push(pkg);
+      }
 
-      if (duplicatePackages.length > 0) {
-        const filteredDuplicatePackages = duplicatePackages
-          .map((pkg) => ({
-            packageName: pkg.packageName,
-            instances: pkg.instances.map((inst) => ({
-              id: inst.id,
-              version: inst.version,
-              dependencies: inst.dependencies,
-              dependencyInfo: this.getInstanceDependencyInfo(
-                importerPath,
-                pkg.packageName,
-                inst.id,
-                options.maxDepth || 10,
-              ),
-            })),
-          }))
-          .filter((pkg) => {
-            // Only omit the entire package if ALL instances should be omitted
-            if (!options.omitTypes || options.omitTypes.length === 0) {
-              return true; // No omit filter, keep all packages
-            }
+      const duplicatePackages: any[] = [];
 
-            // Check if all instances should be omitted
-            const allInstancesShouldBeOmitted = pkg.instances.every((inst) =>
-              this.shouldOmitDependencyType(
-                inst.dependencyInfo.typeSummary,
-                options.omitTypes,
-              ),
-            );
+      for (const [packageName, packageGroup] of packagesByName.entries()) {
+        // Collect all instances across all package entries with the same name
+        const allInstances: any[] = [];
+        for (const pkg of packageGroup) {
+          allInstances.push(...pkg.instances);
+        }
 
-            return !allInstancesShouldBeOmitted; // Keep package if not all instances should be omitted
-          })
-          .filter((pkg) => pkg.instances.length > 1 || options.showAll); // Apply duplicate filter
+        // Check if we have multiple versions (different instance IDs = potential duplicates)
+        const uniqueVersions = new Set(allInstances.map(inst => {
+          // Extract base version without peer deps
+          const parsed = parsePackageString(inst.id);
+          return parsed.version || inst.version;
+        }));
 
-        if (filteredDuplicatePackages.length > 0) {
-          results.push({
-            importerPath,
-            duplicatePackages: filteredDuplicatePackages,
+        const isDuplicate = uniqueVersions.size > 1; // Multiple versions = duplicate
+        
+        if (isDuplicate || options.showAll) {
+          const enrichedInstances = allInstances.map((inst) => ({
+            id: inst.id,
+            version: inst.version,
+            dependencies: inst.dependencies,
+            dependencyInfo: this.getInstanceDependencyInfo(
+              importerPath,
+              packageName,
+              inst.id,
+              options.maxDepth || 10,
+            ),
+          }));
+
+          duplicatePackages.push({
+            packageName,
+            instances: enrichedInstances,
           });
         }
+      }
+
+      // Apply omit types filter
+      const filteredDuplicatePackages = duplicatePackages
+        .map((pkg) => ({
+          packageName: pkg.packageName,
+          instances: pkg.instances.filter((inst: any) => {
+            // Apply omit filter to individual instances
+            if (!options.omitTypes || options.omitTypes.length === 0) {
+              return true; // No omit filter, keep all instances
+            }
+
+            return !this.shouldOmitDependencyType(
+              inst.dependencyInfo.typeSummary,
+              options.omitTypes,
+            );
+          }),
+        }))
+        .filter((pkg) => pkg.instances.length > 0) // Remove packages with no instances after filtering
+        .filter((pkg) => {
+          // Check if this is still a duplicate after omit filtering
+          const uniqueVersionsAfterOmit = new Set(pkg.instances.map((inst: any) => {
+            const parsed = parsePackageString(inst.id);
+            return parsed.version || inst.version;
+          }));
+          
+          return uniqueVersionsAfterOmit.size > 1 || options.showAll;
+        });
+
+      if (filteredDuplicatePackages.length > 0) {
+        results.push({
+          importerPath,
+          duplicatePackages: filteredDuplicatePackages,
+        });
       }
     }
 
