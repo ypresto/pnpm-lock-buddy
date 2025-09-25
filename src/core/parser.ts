@@ -12,7 +12,7 @@ export interface ParsedPackage {
  */
 export function parsePackageString(packageString: string): ParsedPackage {
   if (!packageString || typeof packageString !== "string") {
-    throw new Error("Invalid package string");
+    throw new Error(`Invalid package string: ${packageString}`);
   }
 
   const result: ParsedPackage = {
@@ -56,6 +56,11 @@ export function parsePackageString(packageString: string): ParsedPackage {
   } else {
     // Regular package without version
     result.name = mainPart;
+  }
+
+  // Add safety check for result.name
+  if (!result.name) {
+    throw new Error(`Failed to parse package name from: ${packageString}`);
   }
 
   // Extract scope if present

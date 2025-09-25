@@ -24,6 +24,16 @@ export function packageExists(
       }
     }
 
+    // Also check in importers dependencies/devDependencies/optionalDependencies
+    // for workspace packages that use aliases (like @layerone/bakuraku-fetch)
+    if (path[0] === "importers" && path.length === 4 && 
+        (path[2] === "dependencies" || path[2] === "devDependencies" || path[2] === "optionalDependencies")) {
+      if (key === targetPackage) {
+        found = true;
+        return false; // Stop traversal
+      }
+    }
+
     return true; // Continue traversal
   });
 

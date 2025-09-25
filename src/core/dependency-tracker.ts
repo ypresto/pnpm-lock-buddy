@@ -99,7 +99,7 @@ export class DependencyTracker {
 
       for (const [depName, depInfo] of Object.entries(allDeps || {})) {
         // Check if this is a linked dependency
-        if (depInfo.version.startsWith("link:")) {
+        if (depInfo?.version?.startsWith("link:")) {
           const resolvedImporter = this.resolveLinkPath(
             importerPath,
             depInfo.version,
@@ -474,8 +474,8 @@ export class DependencyTracker {
         if (
           depVersion === packageId ||
           packageId === `${packageName}@${depVersion}` ||
-          depVersion.startsWith(packageId + "(") ||
-          packageId.startsWith(`${packageName}@${depVersion}`)
+          depVersion?.startsWith(packageId + "(") ||
+          packageId?.startsWith(`${packageName}@${depVersion}`)
         ) {
           return [
             {
@@ -584,7 +584,7 @@ export class DependencyTracker {
         break;
       }
       
-      if (directDepInfo.version.startsWith("link:")) {
+      if (directDepInfo?.version?.startsWith("link:")) {
         continue;
       }
 
@@ -680,8 +680,8 @@ export class DependencyTracker {
 
         if (
           depSnapshotId === targetPackageId ||
-          targetPackageId.startsWith(`${depName}@${depVersion}`) ||
-          depSnapshotId.startsWith(targetPackageId)
+          targetPackageId?.startsWith(`${depName}@${depVersion}`) ||
+          depSnapshotId?.startsWith(targetPackageId)
         ) {
           allPaths.push([
             {

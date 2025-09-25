@@ -139,7 +139,7 @@ function formatPathsWithPrefixMerging(
         continue; // Skip middle segments in compact mode
       }
 
-      const isLinked = step.specifier.startsWith("link:");
+      const isLinked = step.specifier?.startsWith("link:");
       const typeCode = isLinked ? "link:" : getTypeShortCode(step.type);
       
       // Calculate if this is the last occurrence of this depth across all paths
@@ -221,7 +221,7 @@ function formatDependencyTree(
         continue;
       }
 
-      const isLinked = step.specifier.startsWith("link:");
+      const isLinked = step.specifier?.startsWith("link:");
       const typeCode = isLinked ? "link:" : getTypeShortCode(step.type);
 
       let prefix = "";

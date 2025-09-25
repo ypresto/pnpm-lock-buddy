@@ -131,7 +131,7 @@ export class DuplicatesUsecase {
         const depInfo = value as { specifier: string; version: string };
 
         // Check if this is a link dependency
-        if (depInfo.version.startsWith("link:")) {
+        if (depInfo?.version?.startsWith("link:")) {
           const linkInstanceId = `${packageName}@${depInfo.version}`;
           const parsed = parsePackageString(linkInstanceId);
 
@@ -175,7 +175,7 @@ export class DuplicatesUsecase {
           // Match either exact instance ID or base version
           if (
             versionString === instanceId ||
-            versionString.startsWith(instanceId + "(") ||
+            versionString?.startsWith(instanceId + "(") ||
             instanceId === `${packageName}@${versionString}`
           ) {
             const instance = instancesMap.get(instanceId);
