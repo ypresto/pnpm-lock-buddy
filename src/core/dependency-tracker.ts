@@ -507,6 +507,32 @@ export class DependencyTracker {
       }
     }
 
+    // Also check snapshots section for file: variants
+    // Complex keys with peer deps often end up here instead of packages
+    for (const [snapKey, snapData] of Object.entries(this.lockfile.snapshots || {})) {
+      if (snapKey.startsWith(filePrefix)) {
+        // Check if this snapshot has the dependency we're looking for
+        const depTypes = [
+          { deps: snapData.dependencies, type: "dependencies" },
+          { deps: snapData.optionalDependencies, type: "optionalDependencies" },
+        ];
+
+        for (const { deps, type } of depTypes) {
+          if (deps?.[packageName] === packageId ||
+              deps?.[packageName] === parsePackageString(packageId).version) {
+            // Found it! Return path showing the full snapshot key
+            return [
+              {
+                package: snapKey, // Use the full snapshot key with peer deps
+                type,
+                specifier: deps[packageName],
+              },
+            ];
+          }
+        }
+      }
+    }
+
     return null;
   }
 
@@ -638,7 +664,7 @@ export class DependencyTracker {
     const allPaths: DependencyPathStep[][] = [];
     const cache = new Map<string, DependencyPathStep[][]>();
     const globalVisited = new Set<string>();
-    
+
     // Performance limits for large monorepos (adjusted based on maxDepth)
     const MAX_TOTAL_PATHS = Math.min(50, maxDepth * 5); // Scale with depth
     const MAX_DIRECT_DEPS_TO_CHECK = Math.min(100, maxDepth * 10); // Scale with depth
@@ -659,7 +685,7 @@ export class DependencyTracker {
       if (allPaths.length >= MAX_TOTAL_PATHS) {
         break;
       }
-      
+
       if (directDepInfo?.version?.startsWith("link:")) {
         continue;
       }
@@ -743,7 +769,7 @@ export class DependencyTracker {
     };
 
     const allPaths: DependencyPathStep[][] = [];
-    
+
     // AGGRESSIVE performance safeguard
     const MAX_PATHS_PER_SNAPSHOT = 5; // Very limited
 
@@ -766,7 +792,7 @@ export class DependencyTracker {
               specifier: depVersion,
             },
           ]);
-          
+
           // If we find direct dependency, prefer it and limit further search
           if (allPaths.length >= 3) {
             break;
@@ -777,14 +803,14 @@ export class DependencyTracker {
 
     // Only search recursively if depth allows and we don't have many paths yet
     if (maxDepth > 1 && allPaths.length < MAX_PATHS_PER_SNAPSHOT) {
-      // Limit how many dependencies we traverse recursively 
+      // Limit how many dependencies we traverse recursively
       const depsToCheck = Object.entries(snapshotDeps || {}).slice(0, 10);
-      
+
       for (const [depName, depVersion] of depsToCheck) {
         if (allPaths.length >= MAX_PATHS_PER_SNAPSHOT) {
           break;
         }
-        
+
         const depSnapshotId =
           this.findSnapshotId(depName, depVersion) || `${depName}@${depVersion}`;
 
