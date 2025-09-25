@@ -50,12 +50,23 @@ export function createDuplicatesCommand(): Command {
         
         if (options.deps !== undefined) {
           showDependencyTree = true;
-          
+
           // Handle --deps=n format
           if (typeof options.deps === "string" && options.deps !== "" && !isNaN(Number(options.deps))) {
             compactTreeDepth = Number(options.deps);
           } else if (typeof options.deps === "number") {
             compactTreeDepth = options.deps;
+          } else if (typeof options.deps === "string" && options.deps !== "" && isNaN(Number(options.deps))) {
+            // --deps consumed what looks like a package name
+            console.error(
+              chalk.yellow(
+                `Warning: It looks like "--deps" consumed "${options.deps}" as its value.\n` +
+                `If "${options.deps}" is a package name, use one of these formats:\n` +
+                `  • Place package names before options: duplicates ${options.deps} --deps\n` +
+                `  • Use -- separator: duplicates --deps -- ${options.deps}\n` +
+                `  • Use explicit depth: duplicates --deps=3 ${options.deps}\n`
+              )
+            );
           }
         }
 
