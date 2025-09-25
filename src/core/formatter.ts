@@ -397,7 +397,10 @@ export function formatPerProjectDuplicates(
         `  ${projectColor(group.importer)}: has ${countColor(String(instanceCount))} instance${instanceCount > 1 ? "s" : ""}`,
       );
 
-      for (const instance of group.instances) {
+      for (let i = 0; i < group.instances.length; i++) {
+        const instance = group.instances[i];
+        const isLast = i === group.instances.length - 1;
+        
         if (showDependencyTree && instance.dependencyInfo) {
           const { path } = instance.dependencyInfo;
 
@@ -419,20 +422,26 @@ export function formatPerProjectDuplicates(
               ),
             );
           } else {
-            // Use canonical version extraction for consistency
+            // For instances without proper dependency paths, create a minimal tree structure
             const canonicalVersion = extractCanonicalVersion(instance.id, packageName);
             const versionKey = `${packageName}@${canonicalVersion}`;
             const versionNum = versionMap.get(versionKey);
             const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
-            lines.push(`    ${displayVersion}`);
+            
+            // Use tree formatting even for simple instances
+            const treePrefix = isLast ? "    └───" : "    ├───";
+            lines.push(`${treePrefix} ${displayVersion}`);
           }
         } else {
-          // Use canonical version extraction for consistency  
+          // Use canonical version extraction for consistency and add tree formatting
           const canonicalVersion = extractCanonicalVersion(instance.id, packageName);
           const versionKey = `${packageName}@${canonicalVersion}`;
           const versionNum = versionMap.get(versionKey);
           const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
-          lines.push(`    ${displayVersion}`);
+          
+          // Always use tree formatting in per-project mode
+          const treePrefix = isLast ? "    └───" : "    ├───";
+          lines.push(`${treePrefix} ${displayVersion}`);
         }
       }
     }

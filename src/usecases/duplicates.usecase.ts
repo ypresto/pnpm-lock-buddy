@@ -165,14 +165,12 @@ export class DuplicatesUsecase {
     project: string,
     packageName: string
   ): string | null {
-    const importerName = this.getPackageNameFromImporterPath(project);
-    if (!importerName) return null;
+    // Instead of guessing package names, directly search for file: variants that match this project
+    const filePattern = `@file:${project}`;
 
-    const filePrefix = `${importerName}@file:${project}`;
-
-    // Check packages section
+    // Check packages section for any package that has file variant for this project
     for (const [pkgKey, pkgData] of Object.entries(this.lockfile.packages || {})) {
-      if (pkgKey.startsWith(filePrefix)) {
+      if (pkgKey.includes(filePattern)) {
         const deps = { ...pkgData.dependencies, ...pkgData.optionalDependencies };
         if (deps[packageName] === instance.id || 
             deps[packageName] === parsePackageString(instance.id).version) {
@@ -183,7 +181,7 @@ export class DuplicatesUsecase {
 
     // Check snapshots section  
     for (const [snapKey, snapData] of Object.entries(this.lockfile.snapshots || {})) {
-      if (snapKey.startsWith(filePrefix)) {
+      if (snapKey.includes(filePattern)) {
         const deps = { ...snapData.dependencies, ...snapData.optionalDependencies };
         if (deps[packageName] === instance.id ||
             deps[packageName] === parsePackageString(instance.id).version) {
@@ -195,20 +193,6 @@ export class DuplicatesUsecase {
     return null;
   }
 
-  /**
-   * Get package name from importer path
-   */
-  private getPackageNameFromImporterPath(importerPath: string): string | null {
-    // Look for the package.json name for this importer
-    // For now, use a simple heuristic based on path
-    if (importerPath.includes("packages/webapp/")) {
-      const parts = importerPath.split("/");
-      const packageName = parts[parts.length - 1];
-      // Convert to scoped package name
-      return `@layerone/${packageName}`;
-    }
-    return null;
-  }
 
   /**
    * Find packages that have multiple instances with different dependencies

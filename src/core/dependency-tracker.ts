@@ -472,19 +472,12 @@ export class DependencyTracker {
     packageName: string,
     packageId: string,
   ): DependencyPathStep[] | null {
-    // Get the package name for this importer path
-    // e.g., packages/webapp/foundation-react -> @layerone/foundation-react
-    const importerName = this.getPackageNameFromImporterPath(importerPath);
-    if (!importerName) {
-      return null;
-    }
+    // Instead of guessing package names, directly search for file: variants that match this project
+    const filePattern = `@file:${importerPath}`;
 
-    // Look for file: variants of this package in the packages section
-    const filePrefix = `${importerName}@file:${importerPath}`;
-
-    // Check all package entries that start with this prefix
+    // Check all package entries that contain file variants for this project
     for (const [pkgKey, pkgData] of Object.entries(this.lockfile.packages || {})) {
-      if (pkgKey.startsWith(filePrefix)) {
+      if (pkgKey.includes(filePattern)) {
         // Check if this variant has the dependency we're looking for
         const depTypes = [
           { deps: pkgData.dependencies, type: "dependencies" },
@@ -515,7 +508,7 @@ export class DependencyTracker {
     // Also check snapshots section for file: variants
     // Complex keys with peer deps often end up here instead of packages
     for (const [snapKey, snapData] of Object.entries(this.lockfile.snapshots || {})) {
-      if (snapKey.startsWith(filePrefix)) {
+      if (snapKey.includes(filePattern)) {
         // Check if this snapshot has the dependency we're looking for
         const depTypes = [
           { deps: snapData.dependencies, type: "dependencies" },
@@ -546,20 +539,6 @@ export class DependencyTracker {
     return null;
   }
 
-  /**
-   * Get package name from importer path
-   */
-  private getPackageNameFromImporterPath(importerPath: string): string | null {
-    // Look for the package.json name for this importer
-    // For now, use a simple heuristic based on path
-    if (importerPath.includes("packages/webapp/")) {
-      const parts = importerPath.split("/");
-      const packageName = parts[parts.length - 1];
-      // Convert to scoped package name
-      return `@layerone/${packageName}`;
-    }
-    return null;
-  }
 
   /**
    * Check if package is a direct dependency
