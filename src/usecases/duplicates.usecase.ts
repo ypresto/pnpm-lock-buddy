@@ -165,10 +165,44 @@ export class DuplicatesUsecase {
     project: string,
     packageName: string
   ): string | null {
-    // Instead of guessing package names, directly search for file: variants that match this project
-    const filePattern = `@file:${project}`;
+    // Method 1: Check if this project uses packages with file: versions
+    const importerData = this.lockfile.importers[project];
+    if (importerData) {
+      const allDeps = {
+        ...importerData.dependencies,
+        ...importerData.devDependencies,
+        ...importerData.optionalDependencies,
+      };
 
-    // Check packages section for any package that has file variant for this project
+      // Look for dependencies that have file: versions
+      for (const [depName, depInfo] of Object.entries(allDeps || {})) {
+        if (depInfo?.version?.startsWith('file:')) {
+          // This is a file variant dependency
+          const fileVariantId = `${depName}@${depInfo.version}`;
+          
+          // Check if this file variant contains our target package
+          const fileVariantData = this.lockfile.packages?.[fileVariantId] || this.lockfile.snapshots?.[fileVariantId];
+          if (fileVariantData) {
+            const fileVariantDeps = {
+              ...fileVariantData.dependencies,
+              ...fileVariantData.optionalDependencies
+            };
+            
+            // Check if this file variant has the package we're looking for
+            if (fileVariantDeps[packageName] === instance.id ||
+                fileVariantDeps[packageName] === parsePackageString(instance.id).version) {
+              return fileVariantId;
+            }
+          }
+        }
+      }
+    }
+
+    // Method 2: Check if this instance comes from a file variant of the current project itself
+    // Look for file variants that match the pattern *@file:{project}
+    const filePattern = `@file:${project}`;
+    
+    // Check packages section
     for (const [pkgKey, pkgData] of Object.entries(this.lockfile.packages || {})) {
       if (pkgKey.includes(filePattern)) {
         const deps = { ...pkgData.dependencies, ...pkgData.optionalDependencies };

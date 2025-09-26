@@ -333,6 +333,22 @@ export function formatDuplicates(
   return lines.join("\n");
 }
 
+/**
+ * Clean up file variant project key for better readability
+ */
+function cleanFileVariantProjectKey(projectKey: string): string {
+  if (projectKey.includes('@file:')) {
+    // Extract just the file path and peer deps part
+    // @layerone/foundation-react@file:packages/webapp/foundation-react(peer-deps)
+    // -> packages/webapp/foundation-react(peer-deps)
+    const fileMatch = projectKey.match(/@file:(.+)/);
+    if (fileMatch && fileMatch[1]) {
+      return fileMatch[1];
+    }
+  }
+  return projectKey;
+}
+
 export function formatPerProjectDuplicates(
   perProjectDuplicates: PerProjectDuplicate[],
   useColor = true,
@@ -393,8 +409,9 @@ export function formatPerProjectDuplicates(
 
     for (const group of importerGroups) {
       const instanceCount = group.instances.length;
+      const cleanImporterName = cleanFileVariantProjectKey(group.importer);
       lines.push(
-        `  ${projectColor(group.importer)}: has ${countColor(String(instanceCount))} instance${instanceCount > 1 ? "s" : ""}`,
+        `  ${projectColor(cleanImporterName)}: has ${countColor(String(instanceCount))} instance${instanceCount > 1 ? "s" : ""}`,
       );
 
       for (let i = 0; i < group.instances.length; i++) {
