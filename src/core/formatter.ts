@@ -407,7 +407,14 @@ export function formatPerProjectDuplicates(
   for (const [packageName, importerGroups] of packageGroups.entries()) {
     lines.push(`\n${packageColor(packageName)}:`);
 
-    for (const group of importerGroups) {
+    // Sort importer groups by cleaned name for better organization
+    const sortedImporterGroups = importerGroups.sort((a, b) => {
+      const cleanA = cleanFileVariantProjectKey(a.importer);
+      const cleanB = cleanFileVariantProjectKey(b.importer);
+      return cleanA.localeCompare(cleanB);
+    });
+
+    for (const group of sortedImporterGroups) {
       const instanceCount = group.instances.length;
       const cleanImporterName = cleanFileVariantProjectKey(group.importer);
       lines.push(
