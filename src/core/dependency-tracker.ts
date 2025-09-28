@@ -125,6 +125,12 @@ export class DependencyTracker {
 
         this.dependencyTrees[importerId] = allNodes;
       }
+
+      // Check if any trees have content, if not, use simple fallback
+      const totalNodes = Object.values(this.dependencyTrees).reduce((sum, tree) => sum + tree.length, 0);
+      if (totalNodes === 0) {
+        this.buildSimpleTreesFromLockfile();
+      }
     } catch (error) {
       // For tests without proper node_modules, build simple trees from lockfile
       this.buildSimpleTreesFromLockfile();
@@ -153,6 +159,8 @@ export class DependencyTracker {
         const isDev = !!importerData.devDependencies?.[depName];
         const isOptional = !!importerData.optionalDependencies?.[depName];
 
+        const transitiveDeps = this.buildTransitiveDependencies(depName, version, lockfile, new Set());
+
         const node: PackageNode = {
           alias: depName,
           name: depName,
@@ -163,7 +171,7 @@ export class DependencyTracker {
           isMissing: false,
           dev: isDev,
           ...(isOptional && { optional: true }),
-          dependencies: this.buildTransitiveDependencies(depName, version, lockfile, new Set())
+          dependencies: transitiveDeps
         };
 
         nodes.push(node);
