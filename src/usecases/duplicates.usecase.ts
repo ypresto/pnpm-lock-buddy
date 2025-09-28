@@ -168,6 +168,7 @@ export class DuplicatesUsecase {
     packageName: string
   ): string | null {
     // Method 1: Check if this project uses packages with file: versions
+    // @ts-expect-error - importers exists at runtime in loaded lockfile
     const importerData = this.lockfile.importers[project];
     if (importerData) {
       const allDeps = {
@@ -186,7 +187,9 @@ export class DuplicatesUsecase {
           const fileVariantData = this.lockfile.packages?.[fileVariantId] || this.lockfile.snapshots?.[fileVariantId];
           if (fileVariantData) {
             const fileVariantDeps = {
+              // @ts-expect-error - LockfilePackageInfo/LockfilePackageSnapshot types don't have dependencies/optionalDependencies, but runtime snapshots do
               ...fileVariantData.dependencies,
+              // @ts-expect-error - LockfilePackageInfo/LockfilePackageSnapshot types don't have optionalDependencies, but runtime snapshots do
               ...fileVariantData.optionalDependencies
             };
             
@@ -207,6 +210,7 @@ export class DuplicatesUsecase {
     // Check packages section
     for (const [pkgKey, pkgData] of Object.entries(this.lockfile.packages || {})) {
       if (pkgKey.includes(filePattern)) {
+        // @ts-expect-error - LockfilePackageInfo doesn't have dependencies, but runtime snapshots do
         const deps = { ...pkgData.dependencies, ...pkgData.optionalDependencies };
         if (deps[packageName] === instance.id || 
             deps[packageName] === parsePackageString(instance.id).version) {
@@ -595,7 +599,7 @@ export class DuplicatesUsecase {
     const types = new Set<string>();
 
     for (const importerPath of importers) {
-      const importerData = this.lockfile.importers[importerPath];
+      const importerData = this.lockfile.importers?.[importerPath];
       if (!importerData) continue;
 
       // Check direct dependencies
@@ -605,8 +609,6 @@ export class DuplicatesUsecase {
         types.add("devDependencies");
       } else if (importerData.optionalDependencies?.[packageName]) {
         types.add("optionalDependencies");
-      } else if (importerData.peerDependencies?.[packageName]) {
-        types.add("peerDependencies");
       } else {
         // It's transitive
         types.add("transitive");

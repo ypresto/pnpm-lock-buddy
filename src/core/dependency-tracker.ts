@@ -6,7 +6,7 @@ import type {
   LinkedDependencyInfo,
   PackageDependencyInfo,
 } from "./types.js";
-import { buildDependenciesHierarchy, type DependenciesHierarchy } from "@pnpm/reviewing.dependencies-hierarchy";
+import { buildDependenciesHierarchy } from "@pnpm/reviewing.dependencies-hierarchy";
 import type { PackageNode } from "@pnpm/reviewing.dependencies-hierarchy";
 import path from "path";
 
@@ -24,7 +24,7 @@ export class DependencyTracker {
   private importerCache = new Map<string, string[]>(); // packageId -> importers (cached)
   private linkedDependencies = new Map<string, LinkedDependencyInfo[]>(); // importer -> linked deps
   private dependencyPaths = new Map<string, DependencyPathStep[]>(); // Unified path cache
-  private isInitialized = false;
+  private initPromise: Promise<void> | null = null;
 
   constructor(lockfilePath: string) {
     this.lockfilePath = lockfilePath;
@@ -82,20 +82,21 @@ export class DependencyTracker {
    * Initialize the dependency tracking by building the complete dependency graph
    */
   private async initialize(): Promise<void> {
-    if (this.isInitialized) return;
+    if (this.initPromise) {
+      return this.initPromise;
+    }
 
-    // NEW Phase 1: Build trees using pnpm's code
-    await this.buildTreesFromPnpm();
+    this.initPromise = (async () => {
+      await this.buildTreesFromPnpm();
 
-    // NEW Phase 2: Build our maps from the trees
-    this.buildDependencyMapFromTrees();
+      this.buildDependencyMapFromTrees();
 
-    // KEEP Phase 3: Build reverse lookup caches (for backward compatibility)
-    this.buildImporterDependencies();
-    this.buildDependencyMap();
-    this.resolveTransitiveDependencies();
+      this.buildImporterDependencies();
+      this.buildDependencyMap();
+      this.resolveTransitiveDependencies();
+    })();
 
-    this.isInitialized = true;
+    return this.initPromise;
   }
 
   /**
@@ -107,9 +108,8 @@ export class DependencyTracker {
     const projectPaths = Object.keys(lockfile.importers || {}).map((importerId) => {
       return importerId === "." ? this.lockfileDir : path.join(this.lockfileDir, importerId);
     });
-
     const hierarchyResult = await buildDependenciesHierarchy(projectPaths, {
-      depth: Infinity,
+      depth: 10,
       lockfileDir: this.lockfileDir,
       virtualStoreDirMaxLength: 120,
     });
@@ -177,15 +177,14 @@ export class DependencyTracker {
   }
 
   /**
-   * Collect direct dependencies for each importer
+   * Collect direct dependencies for each importer (legacy - still needed for path tracing)
    */
   private buildImporterDependencies(): void {
     for (const [importerPath, importerData] of Object.entries(
-      this.getLockfile().importers,
+      this.getLockfile().importers || {},
     )) {
       const deps = new Set<string>();
 
-      // Collect all types of dependencies
       const allDeps = {
         ...importerData.dependencies,
         ...importerData.devDependencies,
@@ -193,15 +192,13 @@ export class DependencyTracker {
       };
 
       for (const [depName, depInfo] of Object.entries(allDeps || {})) {
-        // Check if this is a linked dependency
         if (depInfo?.version?.startsWith("link:")) {
           const resolvedImporter = this.resolveLinkPath(
             importerPath,
             depInfo.version,
           );
 
-          if (resolvedImporter && this.getLockfile().importers[resolvedImporter]) {
-            // Track this linked dependency
+          if (resolvedImporter && this.getLockfile().importers?.[resolvedImporter]) {
             if (!this.linkedDependencies.has(importerPath)) {
               this.linkedDependencies.set(importerPath, []);
             }
@@ -211,48 +208,41 @@ export class DependencyTracker {
               resolvedImporter: resolvedImporter,
             });
 
-            // Add both the original link format and resolved format to the deps set
-            const originalLinkId = `${depName}@${depInfo.version}`; // @layerone/bakuraku-fetch@link:../../packages/webapp/bakuraku-fetch
+            const originalLinkId = `${depName}@${depInfo.version}`;
             deps.add(originalLinkId);
 
-            // Also add a simplified link format for easier matching
             const simpleLinkId = `${depName}@link:${resolvedImporter}`;
             deps.add(simpleLinkId);
 
-            // Add all dependencies from the linked importer
             const linkedImporterData =
-              this.getLockfile().importers[resolvedImporter];
-            const linkedAllDeps = {
-              ...linkedImporterData.dependencies,
-              ...linkedImporterData.devDependencies,
-              ...linkedImporterData.optionalDependencies,
-            };
+              this.getLockfile().importers?.[resolvedImporter];
+            if (linkedImporterData) {
+              const linkedAllDeps = {
+                ...linkedImporterData.dependencies,
+                ...linkedImporterData.devDependencies,
+                ...linkedImporterData.optionalDependencies,
+              };
 
-            for (const [linkedDepName, linkedDepInfo] of Object.entries(
-              linkedAllDeps || {},
-            )) {
-              let snapshotId = linkedDepInfo.version;
+              for (const [linkedDepName, linkedDepInfo] of Object.entries(
+                linkedAllDeps || {},
+              )) {
+                let snapshotId = linkedDepInfo.version;
 
-              // If the version string doesn't exist in snapshots, try to construct it
-              if (!this.getLockfile().snapshots?.[snapshotId]) {
-                const candidateId = `${linkedDepName}@${linkedDepInfo.version}`;
-                if (this.getLockfile().snapshots?.[candidateId]) {
-                  snapshotId = candidateId;
+                if (!this.getLockfile().snapshots?.[snapshotId]) {
+                  const candidateId = `${linkedDepName}@${linkedDepInfo.version}`;
+                  if (this.getLockfile().snapshots?.[candidateId]) {
+                    snapshotId = candidateId;
+                  }
                 }
-              }
 
-              deps.add(snapshotId);
+                deps.add(snapshotId);
+              }
             }
           }
         } else {
-          // Regular dependency processing
-          // The version string might be just a version or include peer deps
-          // Try to find the actual snapshot ID
           let snapshotId = depInfo.version;
 
-          // If the version string doesn't exist in snapshots, try to construct it
           if (!this.getLockfile().snapshots?.[snapshotId]) {
-            // Try with package name + version
             const candidateId = `${depName}@${depInfo.version}`;
             if (this.getLockfile().snapshots?.[candidateId]) {
               snapshotId = candidateId;
@@ -268,10 +258,9 @@ export class DependencyTracker {
   }
 
   /**
-   * Build the reverse dependency map from snapshots
+   * Build reverse dependency map from snapshots (legacy - still needed for some lookups)
    */
   private buildDependencyMap(): void {
-    // Initialize dependency info for all packages
     for (const snapshotId of Object.keys(this.getLockfile().snapshots || {})) {
       if (!this.dependencyMap.has(snapshotId)) {
         this.dependencyMap.set(snapshotId, {
@@ -281,7 +270,6 @@ export class DependencyTracker {
       }
     }
 
-    // Build direct dependency relationships from snapshots
     for (const [snapshotId, snapshotData] of Object.entries(
       this.getLockfile().snapshots || {},
     )) {
@@ -291,10 +279,8 @@ export class DependencyTracker {
       };
 
       for (const [depName, depVersion] of Object.entries(allDeps || {})) {
-        // Find the actual snapshot ID for this dependency
         const depSnapshotId = this.findSnapshotId(depName, depVersion);
         if (depSnapshotId) {
-          // Ensure both packages exist in the map
           if (!this.dependencyMap.has(depSnapshotId)) {
             this.dependencyMap.set(depSnapshotId, {
               importers: new Set(),
@@ -302,7 +288,6 @@ export class DependencyTracker {
             });
           }
 
-          // Record that snapshotId depends on depSnapshotId
           this.dependencyMap
             .get(depSnapshotId)!
             .directDependents.add(snapshotId);
@@ -312,16 +297,14 @@ export class DependencyTracker {
   }
 
   /**
-   * Find the snapshot ID for a given package name and version
+   * Find snapshot ID for a package name and version (legacy helper)
    */
   private findSnapshotId(packageName: string, version: string): string | null {
-    // First try exact match with version
     const exactMatch = `${packageName}@${version}`;
-    if (this.getLockfile().snapshots && this.getLockfile().snapshots[exactMatch]) {
+    if (this.getLockfile().snapshots?.[exactMatch]) {
       return exactMatch;
     }
 
-    // Then try to find a snapshot that starts with the package name and version
     for (const snapshotId of Object.keys(this.getLockfile().snapshots || {})) {
       const parsed = parsePackageString(snapshotId);
       if (parsed.name === packageName && parsed.version === version) {
@@ -333,17 +316,15 @@ export class DependencyTracker {
   }
 
   /**
-   * Resolve transitive dependencies using DFS
+   * Resolve transitive dependencies using DFS (legacy - still needed for path tracing)
    */
   private resolveTransitiveDependencies(): void {
-    // For each importer, find all packages it transitively depends on
     for (const [
       importerPath,
       directDeps,
     ] of this.importerDependencies.entries()) {
       const allTransitiveDeps = new Set<string>();
 
-      // Use DFS to find all transitive dependencies
       const visited = new Set<string>();
       const stack = Array.from(directDeps);
 
@@ -354,11 +335,9 @@ export class DependencyTracker {
         visited.add(currentDep);
         allTransitiveDeps.add(currentDep);
 
-        // Look for this dependency in snapshots (could be the exact ID or need to find matching one)
         let snapshotData = this.getLockfile().snapshots?.[currentDep];
 
         if (!snapshotData) {
-          // Try to find by parsing the current dependency
           const parsed = parsePackageString(currentDep);
           const foundSnapshotId = this.findSnapshotId(
             parsed.name,
@@ -370,7 +349,6 @@ export class DependencyTracker {
         }
 
         if (snapshotData) {
-          // Add all dependencies of this package to the stack
           const subDeps = {
             ...snapshotData.dependencies,
             ...snapshotData.optionalDependencies,
@@ -389,7 +367,6 @@ export class DependencyTracker {
         }
       }
 
-      // Record that this importer uses all these packages transitively
       for (const depId of allTransitiveDeps) {
         if (!this.dependencyMap.has(depId)) {
           this.dependencyMap.set(depId, {
@@ -401,6 +378,7 @@ export class DependencyTracker {
       }
     }
   }
+
 
   /**
    * Get all importers that use a given package (directly or transitively)
@@ -502,6 +480,7 @@ export class DependencyTracker {
     packageId: string,
     maxDepth: number = 10,
   ): DependencyPathStep[][] {
+    // @ts-expect-error - importers exists at runtime after getLockfile() loads the lockfile
     const importerData = this.getLockfile().importers[importerPath];
     if (!importerData) return [];
 
@@ -575,7 +554,9 @@ export class DependencyTracker {
       if (pkgKey.includes(filePattern)) {
         // Check if this variant has the dependency we're looking for
         const depTypes = [
+          // @ts-expect-error - LockfilePackageInfo doesn't have dependencies/optionalDependencies in types, but runtime packages contain merged snapshot data
           { deps: pkgData.dependencies, type: "dependencies" },
+          // @ts-expect-error - LockfilePackageInfo doesn't have optionalDependencies in types, but runtime packages contain merged snapshot data
           { deps: pkgData.optionalDependencies, type: "optionalDependencies" },
         ];
 
@@ -689,6 +670,7 @@ export class DependencyTracker {
     for (const linkedDep of linkedDeps) {
       // Check if target is direct dependency of linked package
       const linkedImporterData =
+        // @ts-expect-error - importers exists at runtime after getLockfile() loads the lockfile
         this.getLockfile().importers[linkedDep.resolvedImporter];
       if (linkedImporterData) {
         const linkedDirectPath = this.checkDirectDependency(
@@ -742,6 +724,7 @@ export class DependencyTracker {
     packageId: string,
     maxDepth: number = 10,
   ): DependencyPathStep[][] {
+    // @ts-expect-error - importers exists at runtime after getLockfile() loads the lockfile
     const importerData = this.getLockfile().importers[importerPath];
     if (!importerData) return [];
 
