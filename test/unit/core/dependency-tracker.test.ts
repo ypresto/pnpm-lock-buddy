@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { DependencyTracker } from "../../../src/core/dependency-tracker";
 import type { PnpmLockfile } from "../../../src/core/lockfile";
+import { parsePackageString } from "../../../src/core/parser";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -22,9 +23,108 @@ afterAll(() => {
 });
 
 function writeMockLockfile(lockfile: PnpmLockfile): string {
-  const filePath = path.join(tempDir, `lock-${Date.now()}.yaml`);
-  fs.writeFileSync(filePath, yaml.dump(lockfile), "utf-8");
-  return filePath;
+  const projectDir = path.join(tempDir, `project-${Date.now()}`);
+  fs.mkdirSync(projectDir, { recursive: true });
+
+  const lockfilePath = path.join(projectDir, "pnpm-lock.yaml");
+  fs.writeFileSync(lockfilePath, yaml.dump(lockfile), "utf-8");
+
+  // Create pnpm-workspace.yaml for workspace detection
+  const workspaceYaml = {
+    packages: Object.keys(lockfile.importers || {})
+      .filter(id => id !== ".")
+      .map(id => `${id}/*`)
+      .concat(Object.keys(lockfile.importers || {}).filter(id => id !== "."))
+  };
+
+  fs.writeFileSync(
+    path.join(projectDir, "pnpm-workspace.yaml"),
+    yaml.dump(workspaceYaml),
+    "utf-8"
+  );
+
+  // Create package.json files for importers
+  for (const [importerId, importerData] of Object.entries(lockfile.importers || {})) {
+    const importerDir = importerId === "." ? projectDir : path.join(projectDir, importerId);
+    fs.mkdirSync(importerDir, { recursive: true });
+
+    // Create package.json with actual dependencies
+    const packageJson: any = {
+      name: importerId === "." ? "root" : importerId.replace(/[^a-z0-9]/g, "-"),
+      version: "1.0.0",
+      private: true
+    };
+
+    if (importerData.dependencies && Object.keys(importerData.dependencies).length > 0) {
+      packageJson.dependencies = Object.fromEntries(
+        Object.entries(importerData.dependencies).map(([name, dep]) => [name, dep.specifier])
+      );
+    }
+
+    if (importerData.devDependencies && Object.keys(importerData.devDependencies).length > 0) {
+      packageJson.devDependencies = Object.fromEntries(
+        Object.entries(importerData.devDependencies).map(([name, dep]) => [name, dep.specifier])
+      );
+    }
+
+    fs.writeFileSync(
+      path.join(importerDir, "package.json"),
+      JSON.stringify(packageJson, null, 2),
+      "utf-8"
+    );
+  }
+
+  // Create minimal node_modules structure with package.json files for each package
+  const nodeModulesDir = path.join(projectDir, "node_modules");
+  fs.mkdirSync(nodeModulesDir, { recursive: true });
+
+  // Create .pnpm directory with modules.yaml
+  const pnpmDir = path.join(nodeModulesDir, ".pnpm");
+  fs.mkdirSync(pnpmDir, { recursive: true });
+
+  const modulesYaml = {
+    hoistPattern: ["*"],
+    hoistedDependencies: {},
+    included: { dependencies: true, devDependencies: true, optionalDependencies: true },
+    layoutVersion: 5,
+    nodeLinker: "isolated",
+    packageManager: "pnpm@9.9.0",
+    pendingBuilds: [],
+    prunedAt: new Date().toISOString(),
+    publicHoistPattern: ["*types*", "*eslint*"],
+    registries: { default: "https://registry.npmjs.org/" },
+    skipped: [],
+    storeDir: path.join(os.homedir(), ".pnpm-store"),
+    virtualStoreDir: ".pnpm"
+  };
+
+  fs.writeFileSync(
+    path.join(pnpmDir, "modules.yaml"),
+    yaml.dump(modulesYaml),
+    "utf-8"
+  );
+
+  // Create package directories for packages in lockfile
+  for (const [packageId] of Object.entries(lockfile.packages || {})) {
+    const parsed = parsePackageString(packageId);
+    if (parsed.name) {
+      const packageDir = path.join(nodeModulesDir, parsed.name);
+      fs.mkdirSync(packageDir, { recursive: true });
+
+      const packageJson = {
+        name: parsed.name,
+        version: parsed.version || "1.0.0"
+      };
+
+      fs.writeFileSync(
+        path.join(packageDir, "package.json"),
+        JSON.stringify(packageJson, null, 2),
+        "utf-8"
+      );
+    }
+  }
+
+  return lockfilePath;
 }
 
 describe("DependencyTracker", () => {
