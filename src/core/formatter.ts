@@ -294,6 +294,7 @@ export function formatDuplicates(
     );
 
     for (const instance of dup.instances) {
+      console.log(`[DEBUG] Formatter: showDependencyTree=${showDependencyTree}, has dependencyInfo=${!!instance.dependencyInfo}, path length=${instance.dependencyInfo?.path?.length || 0}`);
       if (showDependencyTree && instance.dependencyInfo) {
         for (const project of instance.projects) {
           lines.push(`  ${project}:`);
@@ -425,12 +426,15 @@ export function formatPerProjectDuplicates(
         const instance = group.instances[i];
         const isLast = i === group.instances.length - 1;
         
+        console.log(`[DEBUG] PerProject Formatter: showDependencyTree=${showDependencyTree}, has dependencyInfo=${!!instance.dependencyInfo}, path length=${instance.dependencyInfo?.path?.length || 0}`);
         if (showDependencyTree && instance.dependencyInfo) {
           const { path } = instance.dependencyInfo;
 
           const hasRealPath =
             path.length > 1 ||
             (path.length === 1 && path[0].type !== "transitive");
+
+          console.log(`[DEBUG] hasRealPath=${hasRealPath}, path:`, path.map((p: any) => p.package).join(' -> '));
 
           if (hasRealPath) {
             lines.push(

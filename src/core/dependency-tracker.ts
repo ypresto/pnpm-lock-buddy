@@ -503,6 +503,7 @@ export class DependencyTracker {
       throw new Error(`Dependency path not found for package ${packageId} in importer ${importerPath}`);
     }
 
+    console.log(`[DEBUG] getDependencyPath returning ${path.length} steps:`, path.map(p => p.package).join(' -> '));
     return path;
   }
 
@@ -528,7 +529,10 @@ export class DependencyTracker {
       const nameMatch = node.name === parsePackageString(targetPackageId).name;
       const exactMatch = nodeId === targetPackageId || nodeId.startsWith(targetPackageId);
 
+      console.log(`[DEBUG] findPath: checking ${nodeId} vs ${targetPackageId}, nameMatch=${nameMatch}, exactMatch=${exactMatch}, currentDepth=${currentPath.length}`);
+
       if (exactMatch || nameMatch) {
+        console.log(`[DEBUG] findPath: FOUND! Returning path with ${newPath.length} steps`);
         return newPath;
       }
 

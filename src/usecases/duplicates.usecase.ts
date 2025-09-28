@@ -473,27 +473,8 @@ export class DuplicatesUsecase {
           if (
             !existingPackage.instances.find((inst) => inst.id === instance.id)
           ) {
-            // For file variant entries, modify the dependency info to show clean direct dependency
-            let modifiedInstance = instance;
-            if (projectKey.includes('@file:')) {
-              const fileVariantType = instance.dependencyInfo?.path.find(step =>
-                step.package.includes('@file:')
-              )?.type || 'dependencies';
-
-              modifiedInstance = {
-                ...instance,
-                dependencyInfo: {
-                  typeSummary: fileVariantType,
-                  path: [{
-                    package: instance.id,
-                    type: fileVariantType,
-                    specifier: instance.id
-                  }],
-                  allPaths: undefined // Clear to avoid complex tree
-                }
-              };
-            }
-            existingPackage.instances.push(modifiedInstance);
+            // Use the full dependency info with complete paths from tree-based resolution
+            existingPackage.instances.push(instance);
           }
         }
       }
@@ -646,12 +627,17 @@ export class DuplicatesUsecase {
     const typeSummary =
       path.length > 0 ? this.getTypeSummaryFromPath(path) : "transitive";
 
+    console.log(`[DEBUG] Dependency info for ${instanceId}: path length=${path.length}, allPaths length=${allPaths.length}`);
+
+    const finalPath = path.length > 0
+      ? path
+      : [{ package: instanceId, type: "transitive", specifier: "unknown" }];
+
+    console.log(`[DEBUG] Returning dependencyInfo with path length=${finalPath.length}:`, finalPath.map(p => p.package).join(' -> '));
+
     return {
       typeSummary,
-      path:
-        path.length > 0
-          ? path
-          : [{ package: instanceId, type: "transitive", specifier: "unknown" }],
+      path: finalPath,
       allPaths: allPaths.length > 1 ? allPaths : undefined, // Only include if multiple paths exist
     };
   }
