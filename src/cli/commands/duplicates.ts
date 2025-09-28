@@ -37,6 +37,11 @@ export function createDuplicatesCommand(): Command {
       "Limit dependency tree display depth (e.g., --deps-depth=3 shows max 3 levels with '...' for deeper paths)",
     )
     .option(
+      "--depth <number>",
+      "Depth for building dependency tree (default: 10, use higher for deep monorepos)",
+      "10",
+    )
+    .option(
       "--max-depth <number>",
       "Maximum depth for dependency path traversal (default: 10)",
       "10",
@@ -59,7 +64,8 @@ export function createDuplicatesCommand(): Command {
         const lockfile = loadLockfile(lockfilePath);
 
         // Create usecase with file path
-        const duplicatesUsecase = new DuplicatesUsecase(lockfilePath, lockfile);
+        const depth = parseInt(options.depth);
+        const duplicatesUsecase = new DuplicatesUsecase(lockfilePath, lockfile, depth);
 
         // Validate project filter if specified
         if (options.project && options.project.length > 0) {

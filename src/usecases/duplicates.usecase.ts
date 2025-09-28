@@ -47,8 +47,8 @@ export class DuplicatesUsecase {
   private dependencyTracker: DependencyTracker;
   private lockfile: PnpmLockfile;
 
-  constructor(lockfilePath: string, lockfile: PnpmLockfile) {
-    this.dependencyTracker = new DependencyTracker(lockfilePath);
+  constructor(lockfilePath: string, lockfile: PnpmLockfile, depth: number = 10) {
+    this.dependencyTracker = new DependencyTracker(lockfilePath, depth);
     this.lockfile = lockfile;
   }
 
@@ -168,8 +168,7 @@ export class DuplicatesUsecase {
     packageName: string
   ): string | null {
     // Method 1: Check if this project uses packages with file: versions
-    // @ts-expect-error - importers exists at runtime in loaded lockfile
-    const importerData = this.lockfile.importers[project];
+    const importerData = this.dependencyTracker.getImporterData(project);
     if (importerData) {
       const allDeps = {
         ...importerData.dependencies,
@@ -179,17 +178,17 @@ export class DuplicatesUsecase {
 
       // Look for dependencies that have file: versions
       for (const [depName, depInfo] of Object.entries(allDeps || {})) {
+        // @ts-expect-error - depInfo type mismatch from importerData structure
         if (depInfo?.version?.startsWith('file:')) {
           // This is a file variant dependency
+          // @ts-expect-error - depInfo.version exists at runtime
           const fileVariantId = `${depName}@${depInfo.version}`;
           
           // Check if this file variant contains our target package
-          const fileVariantData = this.lockfile.packages?.[fileVariantId] || this.lockfile.snapshots?.[fileVariantId];
+          const fileVariantData = this.dependencyTracker.getPackageOrSnapshotData(fileVariantId);
           if (fileVariantData) {
             const fileVariantDeps = {
-              // @ts-expect-error - LockfilePackageInfo/LockfilePackageSnapshot types don't have dependencies/optionalDependencies, but runtime snapshots do
               ...fileVariantData.dependencies,
-              // @ts-expect-error - LockfilePackageInfo/LockfilePackageSnapshot types don't have optionalDependencies, but runtime snapshots do
               ...fileVariantData.optionalDependencies
             };
             
@@ -208,9 +207,8 @@ export class DuplicatesUsecase {
     const filePattern = `@file:${project}`;
     
     // Check packages section
-    for (const [pkgKey, pkgData] of Object.entries(this.lockfile.packages || {})) {
+    for (const [pkgKey, pkgData] of Object.entries(this.dependencyTracker.getAllPackages())) {
       if (pkgKey.includes(filePattern)) {
-        // @ts-expect-error - LockfilePackageInfo doesn't have dependencies, but runtime snapshots do
         const deps = { ...pkgData.dependencies, ...pkgData.optionalDependencies };
         if (deps[packageName] === instance.id || 
             deps[packageName] === parsePackageString(instance.id).version) {
@@ -220,7 +218,7 @@ export class DuplicatesUsecase {
     }
 
     // Check snapshots section  
-    for (const [snapKey, snapData] of Object.entries(this.lockfile.snapshots || {})) {
+    for (const [snapKey, snapData] of Object.entries(this.dependencyTracker.getAllSnapshots())) {
       if (snapKey.includes(filePattern)) {
         const deps = { ...snapData.dependencies, ...snapData.optionalDependencies };
         if (deps[packageName] === instance.id ||
@@ -599,7 +597,7 @@ export class DuplicatesUsecase {
     const types = new Set<string>();
 
     for (const importerPath of importers) {
-      const importerData = this.lockfile.importers?.[importerPath];
+      const importerData = this.dependencyTracker.getImporterData(importerPath);
       if (!importerData) continue;
 
       // Check direct dependencies

@@ -17,6 +17,7 @@ import path from "path";
 export class DependencyTracker {
   private lockfilePath: string;
   private lockfileDir: string;
+  private depth: number;
   private lockfile: PnpmLockfile | null = null;
   private dependencyTrees: Record<string, PackageNode[]> = {};
   private dependencyMap = new Map<string, PackageDependencyInfo>();
@@ -26,9 +27,10 @@ export class DependencyTracker {
   private dependencyPaths = new Map<string, DependencyPathStep[]>(); // Unified path cache
   private initPromise: Promise<void> | null = null;
 
-  constructor(lockfilePath: string) {
+  constructor(lockfilePath: string, depth: number = 10) {
     this.lockfilePath = lockfilePath;
     this.lockfileDir = path.dirname(lockfilePath);
+    this.depth = depth;
   }
 
   private getLockfile(): PnpmLockfile {
@@ -109,7 +111,7 @@ export class DependencyTracker {
       return importerId === "." ? this.lockfileDir : path.join(this.lockfileDir, importerId);
     });
     const hierarchyResult = await buildDependenciesHierarchy(projectPaths, {
-      depth: 10,
+      depth: this.depth,
       lockfileDir: this.lockfileDir,
       virtualStoreDirMaxLength: 120,
     });
@@ -434,6 +436,34 @@ export class DependencyTracker {
     await this.initialize();
 
     return this.linkedDependencies.get(importerPath) || [];
+  }
+
+  /**
+   * Get importer data by path
+   */
+  getImporterData(importerPath: string): any {
+    return this.getLockfile().importers?.[importerPath];
+  }
+
+  /**
+   * Get all packages
+   */
+  getAllPackages(): Record<string, any> {
+    return this.getLockfile().packages || {};
+  }
+
+  /**
+   * Get all snapshots
+   */
+  getAllSnapshots(): Record<string, any> {
+    return this.getLockfile().snapshots || {};
+  }
+
+  /**
+   * Get package or snapshot data by ID
+   */
+  getPackageOrSnapshotData(packageId: string): any {
+    return this.getLockfile().packages?.[packageId] || this.getLockfile().snapshots?.[packageId];
   }
 
   /**
