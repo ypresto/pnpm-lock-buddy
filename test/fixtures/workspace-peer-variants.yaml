@@ -1,0 +1,80 @@
+lockfileVersion: '9.0'
+
+importers:
+  apps/attendance-webapp:
+    dependencies:
+      '@layerone/ui-react':
+        specifier: workspace:*
+        version: file:packages/webapp/ui-react(@floating-ui/react@0.26.4)(react-dom@18.2.0)(react@18.2.0)
+      react:
+        specifier: 18.2.0
+        version: 18.2.0
+      react-dom:
+        specifier: 18.2.0
+        version: 18.2.0(react@18.2.0)
+
+  packages/webapp/ui-react:
+    dependencies:
+      '@floating-ui/react':
+        specifier: 0.26.4
+        version: 0.26.4(react-dom@18.2.0(react@19.1.1))(react@19.1.1)
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+      react-dom:
+        specifier: 18.2.0
+        version: 18.2.0(react@19.1.1)
+
+packages:
+  '@layerone/ui-react@file:packages/webapp/ui-react':
+    resolution: {directory: packages/webapp/ui-react, type: directory}
+    name: '@layerone/ui-react'
+    version: 0.0.0
+
+  '@floating-ui/react@0.26.4':
+    resolution: {integrity: sha512-example}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
+
+  'react@18.2.0':
+    resolution: {integrity: sha512-example18}
+    engines: {node: '>=0.10.0'}
+
+  'react@19.1.1':
+    resolution: {integrity: sha512-example19}
+    engines: {node: '>=0.10.0'}
+
+  'react-dom@18.2.0':
+    resolution: {integrity: sha512-example-dom}
+    peerDependencies:
+      react: ^18.2.0
+
+snapshots:
+  '@floating-ui/react@0.26.4(react-dom@18.2.0(react@18.2.0))(react@18.2.0)':
+    dependencies:
+      react: 18.2.0
+      react-dom: 18.2.0(react@18.2.0)
+
+  '@floating-ui/react@0.26.4(react-dom@18.2.0(react@19.1.1))(react@19.1.1)':
+    dependencies:
+      react: 19.1.1
+      react-dom: 18.2.0(react@19.1.1)
+
+  '@layerone/ui-react@file:packages/webapp/ui-react(@floating-ui/react@0.26.4)(react-dom@18.2.0)(react@18.2.0)':
+    dependencies:
+      '@floating-ui/react': 0.26.4(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
+      react: 18.2.0
+      react-dom: 18.2.0(react@18.2.0)
+
+  'react@18.2.0': {}
+
+  'react@19.1.1': {}
+
+  'react-dom@18.2.0(react@18.2.0)':
+    dependencies:
+      react: 18.2.0
+
+  'react-dom@18.2.0(react@19.1.1)':
+    dependencies:
+      react: 19.1.1

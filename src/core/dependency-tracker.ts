@@ -720,6 +720,57 @@ export class DependencyTracker {
       }
     }
 
+    // Also check file: variants of workspace packages for alternative peer contexts
+    // This handles cases where workspace packages are used with different peer dependencies
+    const filePattern = `@file:${importerPath}`;
+    for (const [snapKey, snapData] of Object.entries(this.lockfile.snapshots || {})) {
+      if (allPaths.length >= MAX_TOTAL_PATHS) {
+        break;
+      }
+
+      if (snapKey.includes(filePattern)) {
+        const fileVariantDeps = {
+          ...snapData.dependencies,
+          ...snapData.optionalDependencies,
+        };
+
+        for (const [depName, depVersion] of Object.entries(fileVariantDeps || {})) {
+          if (allPaths.length >= MAX_TOTAL_PATHS) {
+            break;
+          }
+
+          let depSnapshotId = this.findSnapshotId(depName, depVersion);
+          if (!depSnapshotId) {
+            depSnapshotId = `${depName}@${depVersion}`;
+          }
+
+          const paths = this.findAllPathsThroughSnapshot(
+            depSnapshotId,
+            packageName,
+            packageId,
+            globalVisited,
+            Math.max(3, Math.min(maxDepth - 1, 20)),
+            cache,
+          );
+
+          if (paths.length > 0) {
+            const directStep: DependencyPathStep = {
+              package: depSnapshotId,
+              type: "dependencies",
+              specifier: depVersion,
+            };
+
+            for (const path of paths) {
+              allPaths.push([directStep, ...path]);
+              if (allPaths.length >= MAX_TOTAL_PATHS) {
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
     return allPaths;
   }
 

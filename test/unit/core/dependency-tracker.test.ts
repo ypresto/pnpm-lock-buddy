@@ -560,7 +560,31 @@ describe("DependencyTracker", () => {
 
         // Path should be found but not exceed reasonable depth
         expect(path.length).toBeGreaterThan(0);
-        expect(path.length).toBeLessThanOrEqual(6); // Max depth is 5 in implementation
+        expect(path.length).toBeLessThanOrEqual(10); // Default maxDepth is 10
+      });
+    });
+
+    describe("workspace packages with peer dependency variants", () => {
+      it("should show complete transitive path through intermediate packages with matching peer context", async () => {
+        const yaml = await import("js-yaml");
+        const fs = await import("fs");
+        const path = await import("path");
+
+        const fixturePath = path.join(__dirname, "../../fixtures/workspace-peer-variants.yaml");
+        const fixtureContent = fs.readFileSync(fixturePath, "utf-8");
+        const lockfile = yaml.load(fixtureContent) as PnpmLockfile;
+
+        const tracker = new DependencyTracker(lockfile);
+
+        const depPath = tracker.getDependencyPath(
+          "packages/webapp/ui-react",
+          "react-dom@18.2.0(react@18.2.0)"
+        );
+
+        expect(depPath.length).toBeGreaterThanOrEqual(2);
+        expect(depPath[0].package).toContain("@floating-ui/react");
+        expect(depPath[0].package).toContain("react@18.2.0");
+        expect(depPath[depPath.length - 1].package).toBe("react-dom@18.2.0(react@18.2.0)");
       });
     });
   });
