@@ -46,17 +46,20 @@ export function createDuplicatesCommand(): Command {
       "Exit with code 1 if duplicate packages are found (useful for CI/CD)",
     )
     .option("-o, --output <format>", "Output format: tree, json", "tree")
-    .action((packageNames: string[], options) => {
+    .action(async (packageNames: string[], options) => {
       try {
         // Parse deps options
         const showDependencyTree = options.deps === true;
         const compactTreeDepth = options.depsDepth ? Number(options.depsDepth) : undefined;
 
-        // Load lockfile
-        const lockfile = loadLockfile(options.file);
+        // Determine lockfile path
+        const lockfilePath = options.file || process.env.PNPM_LOCK_PATH || "pnpm-lock.yaml";
 
-        // Create usecase
-        const duplicatesUsecase = new DuplicatesUsecase(lockfile);
+        // Load lockfile for validation
+        const lockfile = loadLockfile(lockfilePath);
+
+        // Create usecase with file path
+        const duplicatesUsecase = new DuplicatesUsecase(lockfilePath, lockfile);
 
         // Validate project filter if specified
         if (options.project && options.project.length > 0) {
@@ -102,7 +105,7 @@ export function createDuplicatesCommand(): Command {
         let usePerProject = options.perProject;
         if (options.project && !options.perProject) {
           // Check if there are multiple resolution variants by running a quick check
-          const globalDuplicates = duplicatesUsecase.findDuplicates({
+          const globalDuplicates = await duplicatesUsecase.findDuplicates({
             showAll: true,
             packageFilter: packageNames.length > 0 ? packageNames : undefined,
             projectFilter: options.project,
@@ -137,7 +140,7 @@ export function createDuplicatesCommand(): Command {
           );
 
           const perProjectDuplicates =
-            duplicatesUsecase.findPerProjectDuplicates({
+            await duplicatesUsecase.findPerProjectDuplicates({
               showAll: options.all,
               packageFilter: packageNames.length > 0 ? packageNames : undefined,
               projectFilter: options.project,
@@ -193,7 +196,7 @@ export function createDuplicatesCommand(): Command {
             ),
           );
 
-          const duplicates = duplicatesUsecase.findDuplicates({
+          const duplicates = await duplicatesUsecase.findDuplicates({
             showAll: options.all,
             packageFilter: packageNames.length > 0 ? packageNames : undefined,
             projectFilter: options.project,

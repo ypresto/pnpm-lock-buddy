@@ -1,6 +1,31 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { DependencyTracker } from "../../../src/core/dependency-tracker";
 import type { PnpmLockfile } from "../../../src/core/lockfile";
+import fs from "fs";
+import path from "path";
+import os from "os";
+import yaml from "js-yaml";
+
+let tempDir: string;
+let mockLockfilePath: string;
+
+beforeAll(() => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pnpm-lock-buddy-test-"));
+})
+
+;
+
+afterAll(() => {
+  if (tempDir && fs.existsSync(tempDir)) {
+    fs.rmSync(tempDir, { recursive: true });
+  }
+});
+
+function writeMockLockfile(lockfile: PnpmLockfile): string {
+  const filePath = path.join(tempDir, `lock-${Date.now()}.yaml`);
+  fs.writeFileSync(filePath, yaml.dump(lockfile), "utf-8");
+  return filePath;
+}
 
 describe("DependencyTracker", () => {
   const mockLockfile: PnpmLockfile = {
@@ -75,52 +100,56 @@ describe("DependencyTracker", () => {
   };
 
   describe("getImportersForPackage", () => {
-    it("should find direct importers", () => {
-      const tracker = new DependencyTracker(mockLockfile);
+    it("should find direct importers", async () => {
+      const lockfilePath = writeMockLockfile(mockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
-      const expressImporters = tracker.getImportersForPackage("express@4.18.2");
+      const expressImporters = await tracker.getImportersForPackage("express@4.18.2");
       expect(expressImporters).toContain(".");
 
-      const reactImporters = tracker.getImportersForPackage("react@18.2.0");
+      const reactImporters = await tracker.getImportersForPackage("react@18.2.0");
       expect(reactImporters).toContain("packages/app");
     });
 
-    it("should find transitive importers", () => {
-      const tracker = new DependencyTracker(mockLockfile);
+    it("should find transitive importers", async () => {
+      const lockfilePath = writeMockLockfile(mockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
       // body-parser is a transitive dependency of express, which is used by root
       const bodyParserImporters =
-        tracker.getImportersForPackage("body-parser@1.20.0");
+        await tracker.getImportersForPackage("body-parser@1.20.0");
       expect(bodyParserImporters).toContain(".");
 
       // bytes is a transitive dependency of body-parser -> express -> root
-      const bytesImporters = tracker.getImportersForPackage("bytes@3.1.2");
+      const bytesImporters = await tracker.getImportersForPackage("bytes@3.1.2");
       expect(bytesImporters).toContain(".");
 
       // loose-envify is a transitive dependency of react, which is used by packages/app
       const looseEnvifyImporters =
-        tracker.getImportersForPackage("loose-envify@1.4.0");
+        await tracker.getImportersForPackage("loose-envify@1.4.0");
       expect(looseEnvifyImporters).toContain("packages/app");
     });
 
-    it("should handle packages with peer dependencies", () => {
-      const tracker = new DependencyTracker(mockLockfile);
+    it("should handle packages with peer dependencies", async () => {
+      const lockfilePath = writeMockLockfile(mockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
-      const vitestImporters = tracker.getImportersForPackage(
+      const vitestImporters = await tracker.getImportersForPackage(
         "vitest@1.0.0(@types/node@20.10.0)",
       );
       expect(vitestImporters).toContain("packages/app");
     });
 
-    it("should return empty array for non-existent package", () => {
-      const tracker = new DependencyTracker(mockLockfile);
+    it("should return empty array for non-existent package", async () => {
+      const lockfilePath = writeMockLockfile(mockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
       const nonExistentImporters =
-        tracker.getImportersForPackage("non-existent@1.0.0");
+        await tracker.getImportersForPackage("non-existent@1.0.0");
       expect(nonExistentImporters).toEqual([]);
     });
 
-    it("should return sorted results", () => {
+    it("should return sorted results", async () => {
       const complexLockfile: PnpmLockfile = {
         ...mockLockfile,
         importers: {
@@ -142,8 +171,9 @@ describe("DependencyTracker", () => {
         },
       };
 
-      const tracker = new DependencyTracker(complexLockfile);
-      const importers = tracker.getImportersForPackage("shared@1.0.0");
+      const lockfilePath = writeMockLockfile(complexLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
+      const importers = await tracker.getImportersForPackage("shared@1.0.0");
 
       expect(importers).toEqual([
         "packages/a-app",
@@ -154,52 +184,57 @@ describe("DependencyTracker", () => {
   });
 
   describe("getDirectDependentsForPackage", () => {
-    it("should find packages that directly depend on a given package", () => {
-      const tracker = new DependencyTracker(mockLockfile);
+    it("should find packages that directly depend on a given package", async () => {
+      const lockfilePath = writeMockLockfile(mockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
       const bodyParserDependents =
-        tracker.getDirectDependentsForPackage("body-parser@1.20.0");
+        await tracker.getDirectDependentsForPackage("body-parser@1.20.0");
       expect(bodyParserDependents).toContain("express@4.18.2");
 
       const bytesDependents =
-        tracker.getDirectDependentsForPackage("bytes@3.1.2");
+        await tracker.getDirectDependentsForPackage("bytes@3.1.2");
       expect(bytesDependents).toContain("body-parser@1.20.0");
     });
 
-    it("should return empty array for packages with no dependents", () => {
-      const tracker = new DependencyTracker(mockLockfile);
+    it("should return empty array for packages with no dependents", async () => {
+      const lockfilePath = writeMockLockfile(mockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
       const lodashDependents =
-        tracker.getDirectDependentsForPackage("lodash@4.17.21");
+        await tracker.getDirectDependentsForPackage("lodash@4.17.21");
       expect(lodashDependents).toEqual([]);
     });
   });
 
   describe("isPackageUsed", () => {
-    it("should return true for packages used by importers", () => {
-      const tracker = new DependencyTracker(mockLockfile);
+    it("should return true for packages used by importers", async () => {
+      const lockfilePath = writeMockLockfile(mockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
-      expect(tracker.isPackageUsed("express@4.18.2")).toBe(true);
-      expect(tracker.isPackageUsed("body-parser@1.20.0")).toBe(true); // transitive
-      expect(tracker.isPackageUsed("react@18.2.0")).toBe(true);
+      expect(await tracker.isPackageUsed("express@4.18.2")).toBe(true);
+      expect(await tracker.isPackageUsed("body-parser@1.20.0")).toBe(true); // transitive
+      expect(await tracker.isPackageUsed("react@18.2.0")).toBe(true);
     });
 
-    it("should return false for unused packages", () => {
-      const tracker = new DependencyTracker(mockLockfile);
+    it("should return false for unused packages", async () => {
+      const lockfilePath = writeMockLockfile(mockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
-      expect(tracker.isPackageUsed("non-existent@1.0.0")).toBe(false);
+      expect(await tracker.isPackageUsed("non-existent@1.0.0")).toBe(false);
     });
   });
 
   describe("caching behavior", () => {
-    it("should cache results and return same array reference on subsequent calls", () => {
-      const tracker = new DependencyTracker(mockLockfile);
+    it("should cache results and return same array reference on subsequent calls", async () => {
+      const lockfilePath = writeMockLockfile(mockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
       // First call should initialize and compute
-      const result1 = tracker.getImportersForPackage("express@4.18.2");
+      const result1 = await tracker.getImportersForPackage("express@4.18.2");
 
       // Second call should use cached results
-      const result2 = tracker.getImportersForPackage("express@4.18.2");
+      const result2 = await tracker.getImportersForPackage("express@4.18.2");
 
       expect(result1).toEqual(result2);
       expect(result1).toBe(result2); // Same array reference due to caching
@@ -253,14 +288,15 @@ describe("DependencyTracker", () => {
       },
     };
 
-    it("should resolve linked dependencies and include transitive dependencies", () => {
-      const tracker = new DependencyTracker(linkedMockLockfile);
+    it("should resolve linked dependencies and include transitive dependencies", async () => {
+      const lockfilePath = writeMockLockfile(linkedMockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
       // apps/web should have access to lodash and chalk through the linked @my/logger
-      const lodashImporters = tracker.getImportersForPackage("lodash@4.17.21");
+      const lodashImporters = await tracker.getImportersForPackage("lodash@4.17.21");
       expect(lodashImporters).toContain("apps/web");
 
-      const chalkImporters = tracker.getImportersForPackage("chalk@5.0.0");
+      const chalkImporters = await tracker.getImportersForPackage("chalk@5.0.0");
       expect(chalkImporters).toContain("apps/web");
 
       // packages/logger should also have access to its direct dependencies
@@ -268,10 +304,11 @@ describe("DependencyTracker", () => {
       expect(chalkImporters).toContain("packages/logger");
     });
 
-    it("should track linked dependency information", () => {
-      const tracker = new DependencyTracker(linkedMockLockfile);
+    it("should track linked dependency information", async () => {
+      const lockfilePath = writeMockLockfile(linkedMockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
-      const linkedDeps = tracker.getLinkedDependencies("apps/web");
+      const linkedDeps = await tracker.getLinkedDependencies("apps/web");
       expect(linkedDeps).toHaveLength(1);
       expect(linkedDeps[0]).toEqual({
         sourceImporter: "apps/web",
@@ -280,7 +317,7 @@ describe("DependencyTracker", () => {
       });
     });
 
-    it("should handle multiple linked dependencies", () => {
+    it("should handle multiple linked dependencies", async () => {
       const multiLinkedLockfile: PnpmLockfile = {
         ...linkedMockLockfile,
         importers: {
@@ -313,26 +350,28 @@ describe("DependencyTracker", () => {
         },
       };
 
-      const tracker = new DependencyTracker(multiLinkedLockfile);
+      const lockfilePath = writeMockLockfile(multiLinkedLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
       // apps/web should have access to dependencies from both linked packages
-      const ramdalImporters = tracker.getImportersForPackage("ramda@0.29.0");
+      const ramdalImporters = await tracker.getImportersForPackage("ramda@0.29.0");
       expect(ramdalImporters).toContain("apps/web");
 
-      const lodashImporters = tracker.getImportersForPackage("lodash@4.17.21");
+      const lodashImporters = await tracker.getImportersForPackage("lodash@4.17.21");
       expect(lodashImporters).toContain("apps/web");
 
       // Check linked dependency tracking
-      const linkedDeps = tracker.getLinkedDependencies("apps/web");
+      const linkedDeps = await tracker.getLinkedDependencies("apps/web");
       expect(linkedDeps).toHaveLength(2);
       expect(linkedDeps.map((dep) => dep.linkName)).toContain("@my/logger");
       expect(linkedDeps.map((dep) => dep.linkName)).toContain("@my/utils");
     });
 
-    it("should return empty array for importers without linked dependencies", () => {
-      const tracker = new DependencyTracker(linkedMockLockfile);
+    it("should return empty array for importers without linked dependencies", async () => {
+      const lockfilePath = writeMockLockfile(linkedMockLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
 
-      const linkedDeps = tracker.getLinkedDependencies(".");
+      const linkedDeps = await tracker.getLinkedDependencies(".");
       expect(linkedDeps).toEqual([]);
     });
   });
@@ -395,11 +434,12 @@ describe("DependencyTracker", () => {
     };
 
     describe("getDependencyPath", () => {
-      it("should trace single-level transitive dependencies", () => {
-        const tracker = new DependencyTracker(transitiveMockLockfile);
+      it("should trace single-level transitive dependencies", async () => {
+        const lockfilePath = writeMockLockfile(transitiveMockLockfile);
+        const tracker = new DependencyTracker(lockfilePath);
 
         // ui-lib is a transitive dep through app-core
-        const path = tracker.getDependencyPath(".", "ui-lib@3.0.0");
+        const path = await tracker.getDependencyPath(".", "ui-lib@3.0.0");
 
         expect(path).toHaveLength(2);
         expect(path[0].package).toBe("app-core@1.0.0");
@@ -408,11 +448,12 @@ describe("DependencyTracker", () => {
         expect(path[1].type).toBe("dependencies");
       });
 
-      it("should trace multi-level transitive dependencies", () => {
-        const tracker = new DependencyTracker(transitiveMockLockfile);
+      it("should trace multi-level transitive dependencies", async () => {
+        const lockfilePath = writeMockLockfile(transitiveMockLockfile);
+        const tracker = new DependencyTracker(lockfilePath);
 
         // deep-dep is transitive through app-core -> ui-lib
-        const path = tracker.getDependencyPath(".", "deep-dep@0.1.0");
+        const path = await tracker.getDependencyPath(".", "deep-dep@0.1.0");
 
         expect(path).toHaveLength(3);
         expect(path[0].package).toBe("app-core@1.0.0");
@@ -423,33 +464,36 @@ describe("DependencyTracker", () => {
         expect(path[2].type).toBe("dependencies");
       });
 
-      it("should trace transitive dependencies through dev dependencies", () => {
-        const tracker = new DependencyTracker(transitiveMockLockfile);
+      it("should trace transitive dependencies through dev dependencies", async () => {
+        const lockfilePath = writeMockLockfile(transitiveMockLockfile);
+        const tracker = new DependencyTracker(lockfilePath);
 
         // utils comes through build-tools (dev dependency)
-        const path = tracker.getDependencyPath(".", "utils@1.5.0");
+        const path = await tracker.getDependencyPath(".", "utils@1.5.0");
 
         // Should find the shortest path (could be through app-core or build-tools)
         expect(path.length).toBeGreaterThanOrEqual(2);
         expect(path[path.length - 1].package).toBe("utils@1.5.0");
       });
 
-      it("should return direct dependency path without transitive tracing", () => {
-        const tracker = new DependencyTracker(transitiveMockLockfile);
+      it("should return direct dependency path without transitive tracing", async () => {
+        const lockfilePath = writeMockLockfile(transitiveMockLockfile);
+        const tracker = new DependencyTracker(lockfilePath);
 
         // react is direct dependency in packages/ui
-        const path = tracker.getDependencyPath("packages/ui", "react@18.2.0");
+        const path = await tracker.getDependencyPath("packages/ui", "react@18.2.0");
 
         expect(path).toHaveLength(1);
         expect(path[0].package).toBe("react@18.2.0");
         expect(path[0].type).toBe("dependencies");
       });
 
-      it("should trace through linked dependencies", () => {
-        const tracker = new DependencyTracker(transitiveMockLockfile);
+      it("should trace through linked dependencies", async () => {
+        const lockfilePath = writeMockLockfile(transitiveMockLockfile);
+        const tracker = new DependencyTracker(lockfilePath);
 
         // lodash comes through the linked @my/shared package
-        const path = tracker.getDependencyPath("packages/ui", "lodash@4.17.21");
+        const path = await tracker.getDependencyPath("packages/ui", "lodash@4.17.21");
 
         expect(path).toHaveLength(2);
         expect(path[0].package).toBe("@my/shared");
@@ -459,7 +503,7 @@ describe("DependencyTracker", () => {
         expect(path[1].type).toBe("dependencies");
       });
 
-      it("should fallback to transitive indicator when path cannot be traced", () => {
+      it("should fallback to transitive indicator when path cannot be traced", async () => {
         // Create a lockfile with a missing snapshot to simulate untraceable dependency
         const incompletelockfile: PnpmLockfile = {
           lockfileVersion: "9.0",
@@ -482,10 +526,11 @@ describe("DependencyTracker", () => {
           },
         };
 
-        const tracker = new DependencyTracker(incompletelockfile);
+        const lockfilePath = writeMockLockfile(incompletelockfile);
+        const tracker = new DependencyTracker(lockfilePath);
 
         // unknown@2.0.0 exists but has no traceable path
-        const path = tracker.getDependencyPath(".", "unknown@2.0.0");
+        const path = await tracker.getDependencyPath(".", "unknown@2.0.0");
 
         expect(path).toHaveLength(1);
         expect(path[0].package).toBe("unknown@2.0.0");
@@ -493,7 +538,7 @@ describe("DependencyTracker", () => {
         expect(path[0].specifier).toBe("transitive");
       });
 
-      it("should handle circular dependencies without infinite loops", () => {
+      it("should handle circular dependencies without infinite loops", async () => {
         // Create a lockfile with circular dependencies
         const circularLockfile: PnpmLockfile = {
           lockfileVersion: "9.0",
@@ -516,10 +561,11 @@ describe("DependencyTracker", () => {
           },
         };
 
-        const tracker = new DependencyTracker(circularLockfile);
+        const lockfilePath = writeMockLockfile(circularLockfile);
+        const tracker = new DependencyTracker(lockfilePath);
 
         // Should handle circular dependency gracefully
-        const path = tracker.getDependencyPath(".", "pkg-c@1.0.0");
+        const path = await tracker.getDependencyPath(".", "pkg-c@1.0.0");
 
         // Should find a path without getting stuck in infinite loop
         expect(path.length).toBeGreaterThan(0);
@@ -527,7 +573,7 @@ describe("DependencyTracker", () => {
         expect(path[path.length - 1].package).toBe("pkg-c@1.0.0");
       });
 
-      it("should respect max depth limit", () => {
+      it("should respect max depth limit", async () => {
         // Create a very deep dependency chain
         const deepLockfile: PnpmLockfile = {
           lockfileVersion: "9.0",
@@ -553,10 +599,11 @@ describe("DependencyTracker", () => {
           ]),
         };
 
-        const tracker = new DependencyTracker(deepLockfile);
+        const lockfilePath = writeMockLockfile(deepLockfile);
+        const tracker = new DependencyTracker(lockfilePath);
 
         // Should find path to deep dependency but respect depth limit
-        const path = tracker.getDependencyPath(".", "level-9@1.0.0");
+        const path = await tracker.getDependencyPath(".", "level-9@1.0.0");
 
         // Path should be found but not exceed reasonable depth
         expect(path.length).toBeGreaterThan(0);
@@ -574,9 +621,9 @@ describe("DependencyTracker", () => {
         const fixtureContent = fs.readFileSync(fixturePath, "utf-8");
         const lockfile = yaml.load(fixtureContent) as PnpmLockfile;
 
-        const tracker = new DependencyTracker(lockfile, path.join(__dirname, "../../fixtures"));
+        const tracker = new DependencyTracker(fixturePath);
 
-        const depPath = tracker.getDependencyPath(
+        const depPath = await tracker.getDependencyPath(
           "packages/webapp/ui-react",
           "react-dom@18.2.0(react@18.2.0)"
         );

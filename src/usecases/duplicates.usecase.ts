@@ -45,9 +45,11 @@ export interface ProjectPackageDuplicate {
 
 export class DuplicatesUsecase {
   private dependencyTracker: DependencyTracker;
+  private lockfile: PnpmLockfile;
 
-  constructor(private lockfile: PnpmLockfile) {
-    this.dependencyTracker = new DependencyTracker(lockfile);
+  constructor(lockfilePath: string, lockfile: PnpmLockfile) {
+    this.dependencyTracker = new DependencyTracker(lockfilePath);
+    this.lockfile = lockfile;
   }
 
   /**
@@ -82,20 +84,20 @@ export class DuplicatesUsecase {
   /**
    * Ensure all instances have complete dependency info
    */
-  private enrichInstancesWithDependencyInfo(
+  private async enrichInstancesWithDependencyInfo(
     duplicates: DuplicateInstance[],
     options: DuplicatesOptions
-  ): DuplicateInstance[] {
-    return duplicates.map(duplicate => ({
+  ): Promise<DuplicateInstance[]> {
+    return Promise.all(duplicates.map(async duplicate => ({
       ...duplicate,
-      instances: duplicate.instances.map(instance => {
+      instances: await Promise.all(duplicate.instances.map(async instance => {
         // If dependency info is missing or incomplete, generate it
         if (!instance.dependencyInfo || !instance.dependencyInfo.path || instance.dependencyInfo.path.length === 0) {
           const firstProject = instance.projects[0];
           if (firstProject) {
             return {
               ...instance,
-              dependencyInfo: this.getInstanceDependencyInfo(
+              dependencyInfo: await this.getInstanceDependencyInfo(
                 firstProject,
                 duplicate.packageName,
                 instance.id,
@@ -105,8 +107,8 @@ export class DuplicatesUsecase {
           }
         }
         return instance;
-      })
-    }));
+      }))
+    })));
   }
 
   /**
@@ -231,7 +233,7 @@ export class DuplicatesUsecase {
   /**
    * Find packages that have multiple instances with different dependencies
    */
-  findDuplicates(options: DuplicatesOptions = {}): DuplicateInstance[] {
+  async findDuplicates(options: DuplicatesOptions = {}): Promise<DuplicateInstance[]> {
     const { showAll = false, packageFilter, projectFilter } = options;
 
     // Collect all package instances from snapshots
@@ -347,11 +349,11 @@ export class DuplicatesUsecase {
 
       // Only include if there are multiple instances or showAll is true
       if (instanceIds.length > 1 || showAll) {
-        const instances = instanceIds.map((id) => {
+        const instances = await Promise.all(instanceIds.map(async (id) => {
           const instance = instancesMap.get(id)!;
 
           // Use dependency tracker to get all importers (direct + transitive)
-          let allImporters = this.dependencyTracker.getImportersForPackage(id);
+          let allImporters = await this.dependencyTracker.getImportersForPackage(id);
 
           // Apply project filter if specified
           if (projectFilter) {
@@ -366,7 +368,7 @@ export class DuplicatesUsecase {
             // Use first project as representative for dependency path
             const firstProject = allImporters[0];
             if (firstProject) {
-              dependencyInfo = this.getInstanceDependencyInfo(
+              dependencyInfo = await this.getInstanceDependencyInfo(
                 firstProject,
                 packageName,
                 instance.id,
@@ -386,7 +388,7 @@ export class DuplicatesUsecase {
             dependencyType: this.getDependencyType(packageName, allImporters),
             dependencyInfo,
           };
-        });
+        }));
 
         // Filter out instances that have no matching projects
         const filteredInstances = instances.filter(
@@ -418,16 +420,16 @@ export class DuplicatesUsecase {
   /**
    * Find duplicates grouped by importer (reusing existing logic)
    */
-  findPerProjectDuplicates(
+  async findPerProjectDuplicates(
     options: DuplicatesOptions = {},
-  ): PerProjectDuplicate[] {
+  ): Promise<PerProjectDuplicate[]> {
     const { projectFilter } = options;
 
     // Get global duplicates first (with same filtering)
-    const globalDuplicates = this.findDuplicates(options);
+    const globalDuplicates = await this.findDuplicates(options);
 
     // Phase 1: Ensure all instances have complete dependency info
-    const enrichedDuplicates = this.enrichInstancesWithDependencyInfo(globalDuplicates, options);
+    const enrichedDuplicates = await this.enrichInstancesWithDependencyInfo(globalDuplicates, options);
 
     // Phase 2: Group by importer with robust file variant detection
     const importerGroups = new Map<string, DuplicateInstance[]>();
@@ -526,19 +528,19 @@ export class DuplicatesUsecase {
         }));
 
         const isDuplicate = uniqueVersions.size > 1; // Multiple versions = duplicate
-        
+
         if (isDuplicate || options.showAll) {
-          const enrichedInstances = allInstances.map((inst) => ({
+          const enrichedInstances = await Promise.all(allInstances.map(async (inst) => ({
             id: inst.id,
             version: inst.version,
             dependencies: inst.dependencies,
-            dependencyInfo: inst.dependencyInfo || this.getInstanceDependencyInfo(
+            dependencyInfo: inst.dependencyInfo || await this.getInstanceDependencyInfo(
               importerPath,
               packageName,
               inst.id,
               options.maxDepth || 10,
             ),
-          }));
+          })));
 
           duplicatePackages.push({
             packageName,
@@ -622,19 +624,19 @@ export class DuplicatesUsecase {
   /**
    * Get complete dependency information for a specific instance of a package in an importer
    */
-  private getInstanceDependencyInfo(
+  private async getInstanceDependencyInfo(
     importerPath: string,
     _packageName: string,
     instanceId: string,
     maxDepth: number = 10,
-  ): DependencyInfo {
-    const path = this.dependencyTracker.getDependencyPath(
+  ): Promise<DependencyInfo> {
+    const path = await this.dependencyTracker.getDependencyPath(
       importerPath,
       instanceId,
     );
 
     // Get all paths for diamond dependencies
-    const allPaths = this.dependencyTracker.getAllDependencyPaths(
+    const allPaths = await this.dependencyTracker.getAllDependencyPaths(
       importerPath,
       instanceId,
       maxDepth,
