@@ -630,6 +630,7 @@ export class DuplicatesUsecase {
     instanceId: string,
     maxDepth: number = 10,
   ): Promise<DependencyInfo> {
+    console.log(`[DEBUG] getInstanceDependencyInfo: ${importerPath} -> ${instanceId}`);
     const path = await this.dependencyTracker.getDependencyPath(
       importerPath,
       instanceId,

@@ -114,8 +114,16 @@ export class DependencyTracker {
 
       this.dependencyTrees = {};
 
+      console.log(`[DEBUG] hierarchyResult keys:`, Object.keys(hierarchyResult));
+
       for (const [projectDir, hierarchy] of Object.entries(hierarchyResult)) {
         const importerId = projectDir === this.lockfileDir ? "." : path.relative(this.lockfileDir, projectDir);
+
+        console.log(`[DEBUG] Processing ${projectDir} -> ${importerId}`, {
+          deps: hierarchy.dependencies?.length || 0,
+          devDeps: hierarchy.devDependencies?.length || 0,
+          optionalDeps: hierarchy.optionalDependencies?.length || 0
+        });
 
         const allNodes: PackageNode[] = [
           ...(hierarchy.dependencies || []),
@@ -124,98 +132,15 @@ export class DependencyTracker {
         ];
 
         this.dependencyTrees[importerId] = allNodes;
+        console.log(`[DEBUG] Tree for ${importerId}: ${allNodes.length} nodes, first 3:`,
+          allNodes.slice(0, 3).map(n => `${n.name}@${n.version}`));
       }
 
-      // Check if any trees have content, if not, use simple fallback
-      const totalNodes = Object.values(this.dependencyTrees).reduce((sum, tree) => sum + tree.length, 0);
-      if (totalNodes === 0) {
-        this.buildSimpleTreesFromLockfile();
-      }
     } catch (error) {
-      // For tests without proper node_modules, build simple trees from lockfile
-      this.buildSimpleTreesFromLockfile();
+      throw new Error(`buildDependenciesHierarchy failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /**
-   * Build simple dependency trees from lockfile data (for tests)
-   */
-  private buildSimpleTreesFromLockfile(): void {
-    const lockfile = this.getLockfile();
-    this.dependencyTrees = {};
-
-    for (const [importerId, importerData] of Object.entries(lockfile.importers || {})) {
-      const nodes: PackageNode[] = [];
-
-      // Add direct dependencies as top-level nodes
-      const allDeps = {
-        ...importerData.dependencies,
-        ...importerData.devDependencies,
-        ...importerData.optionalDependencies,
-      };
-
-      for (const [depName, depInfo] of Object.entries(allDeps || {})) {
-        const version = depInfo.version;
-        const isDev = !!importerData.devDependencies?.[depName];
-        const isOptional = !!importerData.optionalDependencies?.[depName];
-
-        const transitiveDeps = this.buildTransitiveDependencies(depName, version, lockfile, new Set());
-
-        const node: PackageNode = {
-          alias: depName,
-          name: depName,
-          version,
-          path: `node_modules/${depName}`,
-          isPeer: false,
-          isSkipped: false,
-          isMissing: false,
-          dev: isDev,
-          ...(isOptional && { optional: true }),
-          dependencies: transitiveDeps
-        };
-
-        nodes.push(node);
-      }
-
-      this.dependencyTrees[importerId] = nodes;
-    }
-  }
-
-  /**
-   * Build transitive dependencies for a package (for simple trees)
-   */
-  private buildTransitiveDependencies(
-    packageName: string,
-    packageVersion: string,
-    lockfile: PnpmLockfile,
-    visited: Set<string>
-  ): PackageNode[] | undefined {
-    const packageId = `${packageName}@${packageVersion}`;
-    if (visited.has(packageId)) return undefined;
-    visited.add(packageId);
-
-    const snapshotData = lockfile.snapshots?.[packageId];
-    if (!snapshotData?.dependencies) return undefined;
-
-    const childNodes: PackageNode[] = [];
-
-    for (const [childName, childVersion] of Object.entries(snapshotData.dependencies)) {
-      const childNode: PackageNode = {
-        alias: childName,
-        name: childName,
-        version: childVersion,
-        path: `node_modules/${childName}`,
-        isPeer: false,
-        isSkipped: false,
-        isMissing: false,
-        dependencies: this.buildTransitiveDependencies(childName, childVersion, lockfile, visited)
-      };
-
-      childNodes.push(childNode);
-    }
-
-    return childNodes.length > 0 ? childNodes : undefined;
-  }
 
   /**
    * Build dependency map from pnpm's trees
@@ -562,12 +487,19 @@ export class DependencyTracker {
     await this.initialize();
 
     const tree = this.dependencyTrees[importerPath];
+    console.log(`[DEBUG] getDependencyPath: ${importerPath} -> ${packageId}, tree size: ${tree?.length || 0}`);
+
     if (!tree) {
       throw new Error(`No dependency tree found for importer: ${importerPath}`);
     }
 
     const path = this.findPathInTree(tree, packageId, []);
+    console.log(`[DEBUG] findPathInTree result:`, path ? `${path.length} steps` : 'null');
+
     if (!path) {
+      // List first few packages in tree for debugging
+      const treePackages = tree.slice(0, 5).map(n => `${n.name}@${n.version}`);
+      console.log(`[DEBUG] Tree contains:`, treePackages);
       throw new Error(`Dependency path not found for package ${packageId} in importer ${importerPath}`);
     }
 

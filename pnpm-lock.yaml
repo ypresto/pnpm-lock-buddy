@@ -30,6 +30,9 @@ importers:
         specifier: ^7.5.4
         version: 7.7.2
     devDependencies:
+      '@pnpm/test-fixtures':
+        specifier: ^1000.0.0
+        version: 1000.0.0
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -477,6 +480,9 @@ packages:
     resolution: {integrity: sha512-2eisylRAU/jeuxFEPnS1gjLZKJGbYc4QEtEW6MVUYjO4Xi+2ttkSm7825S0J5IPpUIvln8HYPCUS0eQWSfpOaQ==}
     engines: {node: '>=18.12'}
 
+  '@pnpm/prepare-temp-dir@1000.0.0':
+    resolution: {integrity: sha512-dGwTtjDWUI4bjE0ygO4NPiouVy2iAryra1sWjpK+II+teOGMNU32WXQMm8BWhnAsyvGhEpxaObkfFKVVHUuPzw==}
+
   '@pnpm/ramda@0.28.1':
     resolution: {integrity: sha512-zcAG+lvU0fMziNeGXpPyCyCJYp5ZVrPElEE4t14jAmViaihohocZ+dDkcRIyAomox8pQsuZnv1EyHR+pOhmUWw==}
 
@@ -503,6 +509,10 @@ packages:
   '@pnpm/reviewing.dependencies-hierarchy@3.2.3':
     resolution: {integrity: sha512-kplJ2IDcT5K9Y0Ov6yurpV+vUgz/VA/PtDMdDc7vLUuif9y9fj1ubdkTd7u+zA6ftoPOzQCvneu97o6H+iOBXg==}
     engines: {node: '>=18.12'}
+
+  '@pnpm/test-fixtures@1000.0.0':
+    resolution: {integrity: sha512-tueZ2Dx/ashvQVlS4hwR013q9ZwUMbNSDoXTD0+fP7uD/5eA0ZkEBdT67xYl2b3q7DGdi1GRDI7ramc01gPwtQ==}
+    engines: {node: '>=10'}
 
   '@pnpm/types@1000.8.0':
     resolution: {integrity: sha512-yx86CGHHquWAI0GgKIuV/RnYewcf5fVFZemC45C/K2cX0uV8GB8TUP541ZrokWola2fZx5sn1vL7xzbceRZfoQ==}
@@ -986,6 +996,10 @@ packages:
   flatted@3.3.3:
     resolution: {integrity: sha512-GX+ysw4PBCz0PzosHDepZGANEuFCMLrnRTiEy9McGjmkCQYwRq4A/X786G/fjM/+OjsWSU1ZrY5qyARZmO/uwg==}
 
+  fs-extra@11.3.2:
+    resolution: {integrity: sha512-Xr9F6z6up6Ws+NjzMCZc6WXg2YFRlrLP9NQDO3VQrWrfiojdhS56TzueT88ze0uBdCTwEIhQ3ptnmKeWGFAe0A==}
+    engines: {node: '>=14.14'}
+
   fs.realpath@1.0.0:
     resolution: {integrity: sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw==}
 
@@ -1188,6 +1202,9 @@ packages:
 
   json-stringify-safe@5.0.1:
     resolution: {integrity: sha512-ZClg6AaYvamvYEE82d3Iyd3vSSIjQ+odgjaTzRuO3s7toCdFKczob2i0zCh7JE8kWn17yvAWhUVxvqGwUalsRA==}
+
+  jsonfile@6.2.0:
+    resolution: {integrity: sha512-FGuPw30AdOIUTRMC2OMRtQV+jkVj2cfPqSeWXv1NEAJ1qZ5zb1X6z1mFhbfOB/iy3ssJCD+3KuZ8r8C3uVFlAg==}
 
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
@@ -1616,6 +1633,10 @@ packages:
 
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
+
+  universalify@2.0.1:
+    resolution: {integrity: sha512-gptHNQghINnc/vTGIk0SOFGFNXw7JVrlRUtConJRlvaw6DuX0wO5Jeko9sWrMBhh+PsYAZ7oXAiOnf/UKogyiw==}
+    engines: {node: '>= 10.0.0'}
 
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
@@ -2183,6 +2204,8 @@ snapshots:
 
   '@pnpm/pick-fetcher@3.0.0': {}
 
+  '@pnpm/prepare-temp-dir@1000.0.0': {}
+
   '@pnpm/ramda@0.28.1': {}
 
   '@pnpm/read-modules-dir@7.0.0':
@@ -2229,6 +2252,11 @@ snapshots:
       - '@pnpm/logger'
       - domexception
       - supports-color
+
+  '@pnpm/test-fixtures@1000.0.0':
+    dependencies:
+      '@pnpm/prepare-temp-dir': 1000.0.0
+      fs-extra: 11.3.2
 
   '@pnpm/types@1000.8.0': {}
 
@@ -2759,6 +2787,12 @@ snapshots:
 
   flatted@3.3.3: {}
 
+  fs-extra@11.3.2:
+    dependencies:
+      graceful-fs: 4.2.11
+      jsonfile: 6.2.0
+      universalify: 2.0.1
+
   fs.realpath@1.0.0: {}
 
   fsevents@2.3.3:
@@ -2935,6 +2969,12 @@ snapshots:
   json-stable-stringify-without-jsonify@1.0.1: {}
 
   json-stringify-safe@5.0.1: {}
+
+  jsonfile@6.2.0:
+    dependencies:
+      universalify: 2.0.1
+    optionalDependencies:
+      graceful-fs: 4.2.11
 
   keyv@4.5.4:
     dependencies:
@@ -3341,6 +3381,8 @@ snapshots:
   ufo@1.6.1: {}
 
   undici-types@6.21.0: {}
+
+  universalify@2.0.1: {}
 
   uri-js@4.4.1:
     dependencies:
