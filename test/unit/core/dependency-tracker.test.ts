@@ -574,7 +574,7 @@ describe("DependencyTracker", () => {
         const fixtureContent = fs.readFileSync(fixturePath, "utf-8");
         const lockfile = yaml.load(fixtureContent) as PnpmLockfile;
 
-        const tracker = new DependencyTracker(lockfile);
+        const tracker = new DependencyTracker(lockfile, path.join(__dirname, "../../fixtures"));
 
         const depPath = tracker.getDependencyPath(
           "packages/webapp/ui-react",

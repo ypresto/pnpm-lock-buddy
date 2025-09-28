@@ -5,6 +5,9 @@ import type {
   LinkedDependencyInfo,
   PackageDependencyInfo,
 } from "./types.js";
+import { getTree } from "@pnpm/reviewing.dependencies-hierarchy/lib/getTree.js";
+import type { PackageNode } from "@pnpm/reviewing.dependencies-hierarchy/lib/PackageNode";
+import type { TreeNodeId } from "@pnpm/reviewing.dependencies-hierarchy/lib/TreeNodeId";
 
 /**
  * Tracks transitive dependencies and provides lookup functionality
@@ -12,6 +15,8 @@ import type {
  */
 export class DependencyTracker {
   private lockfile: PnpmLockfile;
+  private lockfileDir: string;
+  private dependencyTrees: Record<string, PackageNode[]> = {};
   private dependencyMap = new Map<string, PackageDependencyInfo>();
   private importerDependencies = new Map<string, Set<string>>(); // importer -> direct deps
   private importerCache = new Map<string, string[]>(); // packageId -> importers (cached)
@@ -19,8 +24,9 @@ export class DependencyTracker {
   private dependencyPaths = new Map<string, DependencyPathStep[]>(); // Unified path cache
   private isInitialized = false;
 
-  constructor(lockfile: PnpmLockfile) {
+  constructor(lockfile: PnpmLockfile, lockfileDir?: string) {
     this.lockfile = lockfile;
+    this.lockfileDir = lockfileDir || process.cwd();
   }
 
   /**
@@ -69,16 +75,193 @@ export class DependencyTracker {
   private initialize(): void {
     if (this.isInitialized) return;
 
-    // Step 1: Collect direct dependencies from importers
+    // NEW Phase 1: Build trees using pnpm's code
+    this.buildTreesFromPnpm();
+
+    // NEW Phase 2: Build our maps from the trees
+    this.buildDependencyMapFromTrees();
+
+    // KEEP Phase 3: Build reverse lookup caches (for backward compatibility)
     this.buildImporterDependencies();
-
-    // Step 2: Build the reverse dependency map from snapshots
     this.buildDependencyMap();
-
-    // Step 3: Resolve transitive dependencies
     this.resolveTransitiveDependencies();
 
     this.isInitialized = true;
+  }
+
+  /**
+   * Transform our lockfile format to pnpm's ProjectSnapshot format
+   */
+  private transformImporters(): Record<string, any> {
+    const transformed: Record<string, any> = {};
+
+    for (const [importerPath, importerData] of Object.entries(
+      this.lockfile.importers,
+    )) {
+      const specifiers: Record<string, string> = {};
+      const dependencies: Record<string, string> = {};
+      const devDependencies: Record<string, string> = {};
+      const optionalDependencies: Record<string, string> = {};
+
+      if (importerData.dependencies) {
+        for (const [name, dep] of Object.entries(importerData.dependencies)) {
+          specifiers[name] = dep.specifier;
+          dependencies[name] = dep.version;
+        }
+      }
+
+      if (importerData.devDependencies) {
+        for (const [name, dep] of Object.entries(
+          importerData.devDependencies,
+        )) {
+          specifiers[name] = dep.specifier;
+          devDependencies[name] = dep.version;
+        }
+      }
+
+      if (importerData.optionalDependencies) {
+        for (const [name, dep] of Object.entries(
+          importerData.optionalDependencies,
+        )) {
+          specifiers[name] = dep.specifier;
+          optionalDependencies[name] = dep.version;
+        }
+      }
+
+      transformed[importerPath] = {
+        specifiers,
+        ...(Object.keys(dependencies).length > 0 && { dependencies }),
+        ...(Object.keys(devDependencies).length > 0 && { devDependencies }),
+        ...(Object.keys(optionalDependencies).length > 0 && {
+          optionalDependencies,
+        }),
+      };
+    }
+
+    return transformed;
+  }
+
+  /**
+   * Merge packages and snapshots into combined PackageSnapshot format for getTree
+   */
+  private mergePackagesAndSnapshots(): Record<string, any> {
+    const merged: Record<string, any> = {};
+
+    // First, add all packages with their info
+    for (const [pkgId, pkgInfo] of Object.entries(this.lockfile.packages || {})) {
+      merged[pkgId] = { ...pkgInfo };
+    }
+
+    // Then merge in snapshot data (dependencies, optionalDependencies)
+    for (const [pkgId, snapshot] of Object.entries(this.lockfile.snapshots || {})) {
+      if (merged[pkgId]) {
+        merged[pkgId] = {
+          ...merged[pkgId],
+          ...snapshot,
+        };
+      } else {
+        // Snapshot without package info - need to create resolution
+        // Parse the package ID to extract name and determine resolution type
+        const parsed = parsePackageString(pkgId);
+
+        let resolution: any;
+        if (pkgId.includes("@file:")) {
+          // File protocol - extract directory path
+          const fileMatch = pkgId.match(/@file:([^(]+)/);
+          resolution = {
+            type: "directory",
+            directory: fileMatch ? fileMatch[1] : parsed.name,
+          };
+        } else {
+          // Fallback to tarball resolution
+          resolution = { integrity: "" };
+        }
+
+        merged[pkgId] = {
+          resolution,
+          ...snapshot,
+        };
+      }
+    }
+
+    return merged;
+  }
+
+  /**
+   * Build dependency trees using pnpm's getTree for correct peer resolution
+   */
+  private buildTreesFromPnpm(): void {
+    const transformedImporters = this.transformImporters();
+    const mergedPackages = this.mergePackagesAndSnapshots();
+
+    const getTreeOpts = {
+      currentPackages: mergedPackages as any,
+      importers: transformedImporters,
+      wantedPackages: mergedPackages as any,
+      lockfileDir: this.lockfileDir,
+      maxDepth: Infinity,
+      includeOptionalDependencies: true,
+      registries: { default: "https://registry.npmjs.org/" },
+      rewriteLinkVersionDir: this.lockfileDir,
+      skipped: new Set<string>(),
+      depTypes: {},
+      virtualStoreDirMaxLength: 120,
+    };
+
+    this.dependencyTrees = {};
+
+    for (const importerId of Object.keys(this.lockfile.importers || {})) {
+      const parentId: TreeNodeId = { type: "importer", importerId };
+      const tree = getTree(getTreeOpts, parentId);
+      this.dependencyTrees[importerId] = tree;
+    }
+  }
+
+  /**
+   * Build dependency map from pnpm's trees
+   */
+  private buildDependencyMapFromTrees(): void {
+    this.dependencyMap = new Map();
+
+    for (const [importerId, tree] of Object.entries(this.dependencyTrees)) {
+      this.traverseTreeAndBuildMap(tree, importerId);
+    }
+  }
+
+  /**
+   * Traverse tree and build dependency map
+   */
+  private traverseTreeAndBuildMap(
+    nodes: PackageNode[],
+    importerId: string,
+  ): void {
+    for (const node of nodes) {
+      const packageId = `${node.name}@${node.version}`;
+
+      if (!this.dependencyMap.has(packageId)) {
+        this.dependencyMap.set(packageId, {
+          importers: new Set(),
+          directDependents: new Set(),
+        });
+      }
+
+      this.dependencyMap.get(packageId)!.importers.add(importerId);
+
+      if (node.dependencies) {
+        for (const child of node.dependencies) {
+          const childId = `${child.name}@${child.version}`;
+          if (!this.dependencyMap.has(childId)) {
+            this.dependencyMap.set(childId, {
+              importers: new Set(),
+              directDependents: new Set(),
+            });
+          }
+          this.dependencyMap.get(childId)!.directDependents.add(packageId);
+        }
+
+        this.traverseTreeAndBuildMap(node.dependencies, importerId);
+      }
+    }
   }
 
   /**

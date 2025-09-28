@@ -1,46 +1,9 @@
 import fs from "fs";
 import path from "path";
 import yaml from "js-yaml";
+import type { LockfileFile } from "@pnpm/lockfile.types";
 
-export interface PnpmLockfile {
-  lockfileVersion: string;
-  settings?: {
-    autoInstallPeers?: boolean;
-    excludeLinksFromLockfile?: boolean;
-    [key: string]: any;
-  };
-  importers: {
-    [path: string]: {
-      dependencies?: Record<string, { specifier: string; version: string }>;
-      devDependencies?: Record<string, { specifier: string; version: string }>;
-      optionalDependencies?: Record<
-        string,
-        { specifier: string; version: string }
-      >;
-      peerDependencies?: Record<string, { specifier: string; version: string }>;
-    };
-  };
-  packages: {
-    [packageId: string]: {
-      resolution: {
-        integrity: string;
-        [key: string]: any;
-      };
-      dependencies?: Record<string, string>;
-      peerDependencies?: Record<string, string>;
-      optionalDependencies?: Record<string, string>;
-      engines?: Record<string, string>;
-      [key: string]: any;
-    };
-  };
-  snapshots?: {
-    [packageId: string]: {
-      dependencies?: Record<string, string>;
-      optionalDependencies?: Record<string, string>;
-      [key: string]: any;
-    };
-  };
-}
+export type PnpmLockfile = Pick<LockfileFile, "importers" | "packages" | "snapshots" | "lockfileVersion">;
 
 // Cache for loaded lockfiles
 const lockfileCache = new Map<string, PnpmLockfile>();
@@ -70,20 +33,24 @@ export function loadLockfile(filePath?: string): PnpmLockfile {
   try {
     // Read and parse the file
     const fileContent = fs.readFileSync(resolvedPath, "utf8");
-    const lockfile = yaml.load(fileContent) as PnpmLockfile;
+    const parsed = yaml.load(fileContent) as any;
 
     // Validate basic structure
-    if (!lockfile || typeof lockfile !== "object") {
+    if (!parsed || typeof parsed !== "object") {
       throw new Error("Invalid lockfile format");
     }
 
-    if (!lockfile.lockfileVersion) {
+    if (!parsed.lockfileVersion) {
       throw new Error("Missing lockfileVersion in lockfile");
     }
 
-    // Ensure required sections exist
-    lockfile.importers = lockfile.importers || {};
-    lockfile.packages = lockfile.packages || {};
+    // Extract only the fields we need
+    const lockfile: PnpmLockfile = {
+      lockfileVersion: parsed.lockfileVersion,
+      importers: parsed.importers || {},
+      packages: parsed.packages || {},
+      snapshots: parsed.snapshots || {},
+    };
 
     // Cache the result
     lockfileCache.set(resolvedPath, lockfile);
