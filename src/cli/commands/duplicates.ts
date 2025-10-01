@@ -21,8 +21,8 @@ export function createDuplicatesCommand(): Command {
       "Group duplicates by importer/project instead of globally",
     )
     .option(
-      "--project <projects...>",
-      'Filter by specific importer/project paths (e.g., "apps/web" "packages/ui")',
+      "--project <projects>",
+      'Filter by specific importer/project paths, comma-separated (e.g., "apps/web,packages/ui")',
     )
     .option(
       "--omit <types...>",
@@ -71,18 +71,22 @@ export function createDuplicatesCommand(): Command {
           depth,
         );
 
-        // Validate project filter if specified
-        if (options.project && options.project.length > 0) {
+        // Parse and validate project filter if specified
+        const projectFilter = options.project
+          ? options.project.split(",").map((p: string) => p.trim())
+          : undefined;
+
+        if (projectFilter && projectFilter.length > 0) {
           const availableProjects = Object.keys(lockfile.importers || {});
-          const missingProjects = options.project.filter(
+          const missingProjects = projectFilter.filter(
             (project: string) => !availableProjects.includes(project),
           );
 
           if (missingProjects.length > 0) {
             console.error(
               chalk.red(
-                `Error: Project${missingProjects.length > 1 ? "s" : ""} not found: ${missingProjects.join(", ")}\\n` +
-                  `Available projects:\\n${availableProjects.map((p) => `  - ${p}`).join("\\n")}`,
+                `Error: Project${missingProjects.length > 1 ? "s" : ""} not found: ${missingProjects.join(", ")}\n` +
+                  `Available projects:\n${availableProjects.map((p) => `  - ${p}`).join("\n")}`,
               ),
             );
             process.exit(1);
@@ -113,12 +117,12 @@ export function createDuplicatesCommand(): Command {
 
         // Auto-detect if we should use per-project format when --project is specified
         let usePerProject = options.perProject;
-        if (options.project && !options.perProject) {
+        if (projectFilter && !options.perProject) {
           // Check if there are multiple resolution variants by running a quick check
           const globalDuplicates = await duplicatesUsecase.findDuplicates({
             showAll: true,
             packageFilter: packageNames.length > 0 ? packageNames : undefined,
-            projectFilter: options.project,
+            projectFilter: projectFilter,
             omitTypes: options.omit,
           });
 
@@ -145,12 +149,12 @@ export function createDuplicatesCommand(): Command {
             packageNames.length > 0
               ? ` (packages: ${packageNames.join(", ")})`
               : "";
-          const projectFilterText = options.project
-            ? ` (projects: ${options.project.join(", ")})`
+          const projectFilterText = projectFilter
+            ? ` (projects: ${projectFilter.join(", ")})`
             : "";
           console.error(
             chalk.gray(
-              `Analyzing ${options.file || "pnpm-lock.yaml"} for per-project duplicates${packageFilterText}${projectFilterText}...\\n`,
+              `Analyzing ${options.file || "pnpm-lock.yaml"} for per-project duplicates${packageFilterText}${projectFilterText}...\n`,
             ),
           );
 
@@ -158,7 +162,7 @@ export function createDuplicatesCommand(): Command {
             await duplicatesUsecase.findPerProjectDuplicates({
               showAll: options.all,
               packageFilter: packageNames.length > 0 ? packageNames : undefined,
-              projectFilter: options.project,
+              projectFilter: projectFilter,
               omitTypes: options.omit,
               maxDepth: parseInt(options.maxDepth),
             });
@@ -181,7 +185,7 @@ export function createDuplicatesCommand(): Command {
 
               console.error(
                 chalk.green(
-                  `Found duplicates in ${perProjectDuplicates.length} project(s) with ${totalPackages} duplicate package(s):\\n`,
+                  `Found duplicates in ${perProjectDuplicates.length} project(s) with ${totalPackages} duplicate package(s):\n`,
                 ),
               );
             }
@@ -202,12 +206,12 @@ export function createDuplicatesCommand(): Command {
             packageNames.length > 0
               ? ` (packages: ${packageNames.join(", ")})`
               : "";
-          const projectFilterText = options.project
-            ? ` (projects: ${options.project.join(", ")})`
+          const projectFilterText = projectFilter
+            ? ` (projects: ${projectFilter.join(", ")})`
             : "";
           console.error(
             chalk.gray(
-              `Analyzing ${options.file || "pnpm-lock.yaml"} for duplicate packages${packageFilterText}${projectFilterText}...\\n`,
+              `Analyzing ${options.file || "pnpm-lock.yaml"} for duplicate packages${packageFilterText}${projectFilterText}...\n`,
             ),
           );
 
@@ -234,7 +238,7 @@ export function createDuplicatesCommand(): Command {
 
               console.error(
                 chalk.green(
-                  `Found ${duplicates.length} package(s) with ${totalInstances} total instances:\\n`,
+                  `Found ${duplicates.length} package(s) with ${totalInstances} total instances:\n`,
                 ),
               );
             }

@@ -365,9 +365,23 @@ export class DuplicatesUsecase {
 
             // Apply project filter if specified
             if (projectFilter) {
-              allImporters = allImporters.filter((imp) =>
-                projectFilter.includes(imp),
-              );
+              allImporters = allImporters.filter((imp) => {
+                // Check exact match
+                if (projectFilter.includes(imp)) return true;
+
+                // Check if this is a file variant or peer variant of a filtered project
+                // File variants have pattern like: path@file:path or path@file:path(peer)(peer)
+                // We want to include all variants that start with the same base project path
+                for (const filterProject of projectFilter) {
+                  if (
+                    imp.startsWith(filterProject + "@file:") ||
+                    imp === filterProject
+                  ) {
+                    return true;
+                  }
+                }
+                return false;
+              });
             }
 
             // Generate dependency info for first project if requested
