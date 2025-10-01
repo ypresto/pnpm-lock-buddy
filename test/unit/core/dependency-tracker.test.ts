@@ -13,9 +13,7 @@ let mockLockfilePath: string;
 
 beforeAll(() => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pnpm-lock-buddy-test-"));
-})
-
-;
+});
 
 afterAll(() => {
   if (tempDir && fs.existsSync(tempDir)) {
@@ -33,45 +31,60 @@ function writeMockLockfile(lockfile: PnpmLockfile): string {
   // Create pnpm-workspace.yaml for workspace detection
   const workspaceYaml = {
     packages: Object.keys(lockfile.importers || {})
-      .filter(id => id !== ".")
-      .map(id => `${id}/*`)
-      .concat(Object.keys(lockfile.importers || {}).filter(id => id !== "."))
+      .filter((id) => id !== ".")
+      .map((id) => `${id}/*`)
+      .concat(Object.keys(lockfile.importers || {}).filter((id) => id !== ".")),
   };
 
   fs.writeFileSync(
     path.join(projectDir, "pnpm-workspace.yaml"),
     yaml.dump(workspaceYaml),
-    "utf-8"
+    "utf-8",
   );
 
   // Create package.json files for importers
-  for (const [importerId, importerData] of Object.entries(lockfile.importers || {})) {
-    const importerDir = importerId === "." ? projectDir : path.join(projectDir, importerId);
+  for (const [importerId, importerData] of Object.entries(
+    lockfile.importers || {},
+  )) {
+    const importerDir =
+      importerId === "." ? projectDir : path.join(projectDir, importerId);
     fs.mkdirSync(importerDir, { recursive: true });
 
     // Create package.json with actual dependencies
     const packageJson: any = {
       name: importerId === "." ? "root" : importerId.replace(/[^a-z0-9]/g, "-"),
       version: "1.0.0",
-      private: true
+      private: true,
     };
 
-    if (importerData.dependencies && Object.keys(importerData.dependencies).length > 0) {
+    if (
+      importerData.dependencies &&
+      Object.keys(importerData.dependencies).length > 0
+    ) {
       packageJson.dependencies = Object.fromEntries(
-        Object.entries(importerData.dependencies).map(([name, dep]) => [name, dep.specifier])
+        Object.entries(importerData.dependencies).map(([name, dep]) => [
+          name,
+          dep.specifier,
+        ]),
       );
     }
 
-    if (importerData.devDependencies && Object.keys(importerData.devDependencies).length > 0) {
+    if (
+      importerData.devDependencies &&
+      Object.keys(importerData.devDependencies).length > 0
+    ) {
       packageJson.devDependencies = Object.fromEntries(
-        Object.entries(importerData.devDependencies).map(([name, dep]) => [name, dep.specifier])
+        Object.entries(importerData.devDependencies).map(([name, dep]) => [
+          name,
+          dep.specifier,
+        ]),
       );
     }
 
     fs.writeFileSync(
       path.join(importerDir, "package.json"),
       JSON.stringify(packageJson, null, 2),
-      "utf-8"
+      "utf-8",
     );
   }
 
@@ -86,7 +99,11 @@ function writeMockLockfile(lockfile: PnpmLockfile): string {
   const modulesYaml = {
     hoistPattern: ["*"],
     hoistedDependencies: {},
-    included: { dependencies: true, devDependencies: true, optionalDependencies: true },
+    included: {
+      dependencies: true,
+      devDependencies: true,
+      optionalDependencies: true,
+    },
     layoutVersion: 5,
     nodeLinker: "isolated",
     packageManager: "pnpm@9.9.0",
@@ -96,13 +113,13 @@ function writeMockLockfile(lockfile: PnpmLockfile): string {
     registries: { default: "https://registry.npmjs.org/" },
     skipped: [],
     storeDir: path.join(os.homedir(), ".pnpm-store"),
-    virtualStoreDir: ".pnpm"
+    virtualStoreDir: ".pnpm",
   };
 
   fs.writeFileSync(
     path.join(pnpmDir, "modules.yaml"),
     yaml.dump(modulesYaml),
-    "utf-8"
+    "utf-8",
   );
 
   // For now, skip complex tests that need real node_modules
@@ -187,10 +204,12 @@ describe("DependencyTracker", () => {
       const lockfilePath = writeMockLockfile(mockLockfile);
       const tracker = new DependencyTracker(lockfilePath);
 
-      const expressImporters = await tracker.getImportersForPackage("express@4.18.2");
+      const expressImporters =
+        await tracker.getImportersForPackage("express@4.18.2");
       expect(expressImporters).toContain(".");
 
-      const reactImporters = await tracker.getImportersForPackage("react@18.2.0");
+      const reactImporters =
+        await tracker.getImportersForPackage("react@18.2.0");
       expect(reactImporters).toContain("packages/app");
     });
 
@@ -204,7 +223,8 @@ describe("DependencyTracker", () => {
       expect(bodyParserImporters).toContain(".");
 
       // bytes is a transitive dependency of body-parser -> express -> root
-      const bytesImporters = await tracker.getImportersForPackage("bytes@3.1.2");
+      const bytesImporters =
+        await tracker.getImportersForPackage("bytes@3.1.2");
       expect(bytesImporters).toContain(".");
 
       // loose-envify is a transitive dependency of react, which is used by packages/app
@@ -376,10 +396,12 @@ describe("DependencyTracker", () => {
       const tracker = new DependencyTracker(lockfilePath);
 
       // apps/web should have access to lodash and chalk through the linked @my/logger
-      const lodashImporters = await tracker.getImportersForPackage("lodash@4.17.21");
+      const lodashImporters =
+        await tracker.getImportersForPackage("lodash@4.17.21");
       expect(lodashImporters).toContain("apps/web");
 
-      const chalkImporters = await tracker.getImportersForPackage("chalk@5.0.0");
+      const chalkImporters =
+        await tracker.getImportersForPackage("chalk@5.0.0");
       expect(chalkImporters).toContain("apps/web");
 
       // packages/logger should also have access to its direct dependencies
@@ -437,10 +459,12 @@ describe("DependencyTracker", () => {
       const tracker = new DependencyTracker(lockfilePath);
 
       // apps/web should have access to dependencies from both linked packages
-      const ramdalImporters = await tracker.getImportersForPackage("ramda@0.29.0");
+      const ramdalImporters =
+        await tracker.getImportersForPackage("ramda@0.29.0");
       expect(ramdalImporters).toContain("apps/web");
 
-      const lodashImporters = await tracker.getImportersForPackage("lodash@4.17.21");
+      const lodashImporters =
+        await tracker.getImportersForPackage("lodash@4.17.21");
       expect(lodashImporters).toContain("apps/web");
 
       // Check linked dependency tracking
@@ -461,7 +485,10 @@ describe("DependencyTracker", () => {
 
   describe("tree-based dependency resolution", () => {
     it("should work with real fixture that has node_modules", async () => {
-      const fixturePath = path.join(__dirname, "../../fixtures/basic-project/pnpm-lock.yaml");
+      const fixturePath = path.join(
+        __dirname,
+        "../../fixtures/basic-project/pnpm-lock.yaml",
+      );
       const tracker = new DependencyTracker(fixturePath);
 
       // Test basic functionality that should work with buildDependenciesHierarchy
@@ -473,7 +500,10 @@ describe("DependencyTracker", () => {
     });
 
     it("should find dependency paths in tree structure", async () => {
-      const fixturePath = path.join(__dirname, "../../fixtures/basic-project/pnpm-lock.yaml");
+      const fixturePath = path.join(
+        __dirname,
+        "../../fixtures/basic-project/pnpm-lock.yaml",
+      );
       const tracker = new DependencyTracker(fixturePath);
 
       try {
@@ -593,7 +623,10 @@ describe("DependencyTracker", () => {
         const tracker = new DependencyTracker(lockfilePath);
 
         // react is direct dependency in packages/ui
-        const path = await tracker.getDependencyPath("packages/ui", "react@18.2.0");
+        const path = await tracker.getDependencyPath(
+          "packages/ui",
+          "react@18.2.0",
+        );
 
         expect(path).toHaveLength(1);
         expect(path[0].package).toBe("react@18.2.0");
@@ -605,7 +638,10 @@ describe("DependencyTracker", () => {
         const tracker = new DependencyTracker(lockfilePath);
 
         // lodash comes through the linked @my/shared package
-        const path = await tracker.getDependencyPath("packages/ui", "lodash@4.17.21");
+        const path = await tracker.getDependencyPath(
+          "packages/ui",
+          "lodash@4.17.21",
+        );
 
         expect(path).toHaveLength(2);
         expect(path[0].package).toBe("@my/shared");
@@ -729,7 +765,10 @@ describe("DependencyTracker", () => {
         const fs = await import("fs");
         const path = await import("path");
 
-        const fixturePath = path.join(__dirname, "../../fixtures/workspace-peer-variants.yaml");
+        const fixturePath = path.join(
+          __dirname,
+          "../../fixtures/workspace-peer-variants.yaml",
+        );
         const fixtureContent = fs.readFileSync(fixturePath, "utf-8");
         const lockfile = yaml.load(fixtureContent) as PnpmLockfile;
 
@@ -737,13 +776,15 @@ describe("DependencyTracker", () => {
 
         const depPath = await tracker.getDependencyPath(
           "packages/webapp/ui-react",
-          "react-dom@18.2.0(react@18.2.0)"
+          "react-dom@18.2.0(react@18.2.0)",
         );
 
         expect(depPath.length).toBeGreaterThanOrEqual(2);
         expect(depPath[0].package).toContain("@floating-ui/react");
         expect(depPath[0].package).toContain("react@18.2.0");
-        expect(depPath[depPath.length - 1].package).toBe("react-dom@18.2.0(react@18.2.0)");
+        expect(depPath[depPath.length - 1].package).toBe(
+          "react-dom@18.2.0(react@18.2.0)",
+        );
       });
     });
   });

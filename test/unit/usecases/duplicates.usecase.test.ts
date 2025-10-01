@@ -9,7 +9,9 @@ import yaml from "js-yaml";
 let tempDir: string;
 
 beforeAll(() => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pnpm-lock-buddy-usecase-test-"));
+  tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "pnpm-lock-buddy-usecase-test-"),
+  );
 });
 
 afterAll(() => {

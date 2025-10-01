@@ -1,6 +1,5 @@
 import type { PnpmLockfile } from "../core/lockfile.js";
 import { parsePackageString } from "../core/parser.js";
-import { traverseLockfile } from "../core/traverser.js";
 import { validatePackages, matchesAnyWildcard } from "../core/utils.js";
 import {
   formatDuplicates,
@@ -9,6 +8,7 @@ import {
 } from "../core/formatter.js";
 import { DependencyTracker } from "../core/dependency-tracker.js";
 import type { DependencyPathStep, DependencyInfo } from "../core/types.js";
+import type { PackageNode } from "@pnpm/reviewing.dependencies-hierarchy";
 
 export interface DuplicatesOptions {
   showAll?: boolean;
@@ -47,7 +47,11 @@ export class DuplicatesUsecase {
   private dependencyTracker: DependencyTracker;
   private lockfile: PnpmLockfile;
 
-  constructor(lockfilePath: string, lockfile: PnpmLockfile, depth: number = 10) {
+  constructor(
+    lockfilePath: string,
+    lockfile: PnpmLockfile,
+    depth: number = 10,
+  ) {
     this.dependencyTracker = new DependencyTracker(lockfilePath, depth);
     this.lockfile = lockfile;
   }
@@ -86,29 +90,37 @@ export class DuplicatesUsecase {
    */
   private async enrichInstancesWithDependencyInfo(
     duplicates: DuplicateInstance[],
-    options: DuplicatesOptions
+    options: DuplicatesOptions,
   ): Promise<DuplicateInstance[]> {
-    return Promise.all(duplicates.map(async duplicate => ({
-      ...duplicate,
-      instances: await Promise.all(duplicate.instances.map(async instance => {
-        // If dependency info is missing or incomplete, generate it
-        if (!instance.dependencyInfo || !instance.dependencyInfo.path || instance.dependencyInfo.path.length === 0) {
-          const firstProject = instance.projects[0];
-          if (firstProject) {
-            return {
-              ...instance,
-              dependencyInfo: await this.getInstanceDependencyInfo(
-                firstProject,
-                duplicate.packageName,
-                instance.id,
-                options.maxDepth || 10
-              )
-            };
-          }
-        }
-        return instance;
-      }))
-    })));
+    return Promise.all(
+      duplicates.map(async (duplicate) => ({
+        ...duplicate,
+        instances: await Promise.all(
+          duplicate.instances.map(async (instance) => {
+            // If dependency info is missing or incomplete, generate it
+            if (
+              !instance.dependencyInfo ||
+              !instance.dependencyInfo.path ||
+              instance.dependencyInfo.path.length === 0
+            ) {
+              const firstProject = instance.projects[0];
+              if (firstProject) {
+                return {
+                  ...instance,
+                  dependencyInfo: await this.getInstanceDependencyInfo(
+                    firstProject,
+                    duplicate.packageName,
+                    instance.id,
+                    options.maxDepth || 10,
+                  ),
+                };
+              }
+            }
+            return instance;
+          }),
+        ),
+      })),
+    );
   }
 
   /**
@@ -117,20 +129,26 @@ export class DuplicatesUsecase {
   private detectFileVariantProjectKey(
     instance: any,
     project: string,
-    packageName: string
+    packageName: string,
   ): string {
     // Method 1: Check dependency path
-    const fileVariantFromPath = this.detectFromDependencyPath(instance.dependencyInfo);
+    const fileVariantFromPath = this.detectFromDependencyPath(
+      instance.dependencyInfo,
+    );
     if (fileVariantFromPath) return fileVariantFromPath;
-    
+
     // Method 2: Check instance ID patterns
     const fileVariantFromId = this.detectFromInstanceId(instance.id, project);
     if (fileVariantFromId) return fileVariantFromId;
-    
+
     // Method 3: Direct lockfile analysis
-    const fileVariantFromLockfile = this.detectFromLockfile(instance, project, packageName);
+    const fileVariantFromLockfile = this.detectFromLockfile(
+      instance,
+      project,
+      packageName,
+    );
     if (fileVariantFromLockfile) return fileVariantFromLockfile;
-    
+
     // Fallback: regular project
     return project;
   }
@@ -140,20 +158,23 @@ export class DuplicatesUsecase {
    */
   private detectFromDependencyPath(dependencyInfo: any): string | null {
     if (!dependencyInfo?.path) return null;
-    
-    const fileVariantStep = dependencyInfo.path.find((step: any) => 
-      step.package.includes('@file:')
+
+    const fileVariantStep = dependencyInfo.path.find((step: any) =>
+      step.package.includes("@file:"),
     );
-    
+
     return fileVariantStep ? fileVariantStep.package : null;
   }
 
   /**
    * Detect file variant from instance ID patterns
    */
-  private detectFromInstanceId(instanceId: string, _project: string): string | null {
+  private detectFromInstanceId(
+    instanceId: string,
+    _project: string,
+  ): string | null {
     // If the instance ID itself contains file: reference
-    if (instanceId.includes('@file:')) {
+    if (instanceId.includes("@file:")) {
       return instanceId;
     }
     return null;
@@ -165,7 +186,7 @@ export class DuplicatesUsecase {
   private detectFromLockfile(
     instance: any,
     project: string,
-    packageName: string
+    packageName: string,
   ): string | null {
     // Method 1: Check if this project uses packages with file: versions
     const importerData = this.dependencyTracker.getImporterData(project);
@@ -179,22 +200,26 @@ export class DuplicatesUsecase {
       // Look for dependencies that have file: versions
       for (const [depName, depInfo] of Object.entries(allDeps || {})) {
         // @ts-expect-error - depInfo type mismatch from importerData structure
-        if (depInfo?.version?.startsWith('file:')) {
+        if (depInfo?.version?.startsWith("file:")) {
           // This is a file variant dependency
           // @ts-expect-error - depInfo.version exists at runtime
           const fileVariantId = `${depName}@${depInfo.version}`;
-          
+
           // Check if this file variant contains our target package
-          const fileVariantData = this.dependencyTracker.getPackageOrSnapshotData(fileVariantId);
+          const fileVariantData =
+            this.dependencyTracker.getPackageOrSnapshotData(fileVariantId);
           if (fileVariantData) {
             const fileVariantDeps = {
               ...fileVariantData.dependencies,
-              ...fileVariantData.optionalDependencies
+              ...fileVariantData.optionalDependencies,
             };
-            
+
             // Check if this file variant has the package we're looking for
-            if (fileVariantDeps[packageName] === instance.id ||
-                fileVariantDeps[packageName] === parsePackageString(instance.id).version) {
+            if (
+              fileVariantDeps[packageName] === instance.id ||
+              fileVariantDeps[packageName] ===
+                parsePackageString(instance.id).version
+            ) {
               return fileVariantId;
             }
           }
@@ -205,24 +230,38 @@ export class DuplicatesUsecase {
     // Method 2: Check if this instance comes from a file variant of the current project itself
     // Look for file variants that match the pattern *@file:{project}
     const filePattern = `@file:${project}`;
-    
+
     // Check packages section
-    for (const [pkgKey, pkgData] of Object.entries(this.dependencyTracker.getAllPackages())) {
+    for (const [pkgKey, pkgData] of Object.entries(
+      this.dependencyTracker.getAllPackages(),
+    )) {
       if (pkgKey.includes(filePattern)) {
-        const deps = { ...pkgData.dependencies, ...pkgData.optionalDependencies };
-        if (deps[packageName] === instance.id || 
-            deps[packageName] === parsePackageString(instance.id).version) {
+        const deps = {
+          ...pkgData.dependencies,
+          ...pkgData.optionalDependencies,
+        };
+        if (
+          deps[packageName] === instance.id ||
+          deps[packageName] === parsePackageString(instance.id).version
+        ) {
           return pkgKey;
         }
       }
     }
 
-    // Check snapshots section  
-    for (const [snapKey, snapData] of Object.entries(this.dependencyTracker.getAllSnapshots())) {
+    // Check snapshots section
+    for (const [snapKey, snapData] of Object.entries(
+      this.dependencyTracker.getAllSnapshots(),
+    )) {
       if (snapKey.includes(filePattern)) {
-        const deps = { ...snapData.dependencies, ...snapData.optionalDependencies };
-        if (deps[packageName] === instance.id ||
-            deps[packageName] === parsePackageString(instance.id).version) {
+        const deps = {
+          ...snapData.dependencies,
+          ...snapData.optionalDependencies,
+        };
+        if (
+          deps[packageName] === instance.id ||
+          deps[packageName] === parsePackageString(instance.id).version
+        ) {
           return snapKey;
         }
       }
@@ -231,114 +270,80 @@ export class DuplicatesUsecase {
     return null;
   }
 
+  /**
+   * Collect package instances from dependency trees (only actually resolved packages)
+   */
+  private async collectInstancesFromTrees(): Promise<
+    Map<string, PackageInstance>
+  > {
+    const trees = await this.dependencyTracker.getDependencyTrees();
+    const instancesMap = new Map<string, PackageInstance>();
+
+    for (const [importerPath, tree] of Object.entries(trees)) {
+      this.collectFromTreeNodes(tree, importerPath, instancesMap);
+    }
+
+    return instancesMap;
+  }
 
   /**
-   * Find packages that have multiple instances with different dependencies
+   * Recursively collect package instances from tree nodes
    */
-  async findDuplicates(options: DuplicatesOptions = {}): Promise<DuplicateInstance[]> {
-    const { showAll = false, packageFilter, projectFilter } = options;
+  private collectFromTreeNodes(
+    nodes: PackageNode[],
+    importerPath: string,
+    instancesMap: Map<string, PackageInstance>,
+  ): void {
+    for (const node of nodes) {
+      const instanceId = `${node.name}@${node.version}`;
+      const parsed = parsePackageString(instanceId);
 
-    // Collect all package instances from snapshots
-    const instancesMap = new Map<string, PackageInstance>();
-    const packageGroups = new Map<string, string[]>(); // packageName -> instanceIds
-
-    // First, collect all instances from snapshots
-    traverseLockfile(this.lockfile, (context) => {
-      const { key, value, path } = context;
-
-      if (path[0] === "snapshots" && path.length === 2) {
-        const instanceId = key;
-        const parsed = parsePackageString(instanceId);
-
-        if (parsed.name) {
-          const dependencies = (value as any).dependencies || {};
-          const optionalDependencies =
-            (value as any).optionalDependencies || {};
-
+      if (parsed.name) {
+        if (!instancesMap.has(instanceId)) {
           const instance: PackageInstance = {
             id: instanceId,
             packageName: parsed.name,
-            version: parsed.version || "",
-            dependencies: { ...dependencies, ...optionalDependencies },
+            version: parsed.version || node.version,
+            dependencies: {}, // Will be filled from snapshots if needed
             projects: new Set(),
           };
-
           instancesMap.set(instanceId, instance);
+        }
 
-          // Group by package name
-          if (!packageGroups.has(parsed.name)) {
-            packageGroups.set(parsed.name, []);
-          }
-          packageGroups.get(parsed.name)!.push(instanceId);
+        // Add this project to the instance
+        instancesMap.get(instanceId)!.projects.add(importerPath);
+
+        // Recursively process child dependencies
+        if (node.dependencies) {
+          this.collectFromTreeNodes(
+            node.dependencies,
+            importerPath,
+            instancesMap,
+          );
         }
       }
-    });
+    }
+  }
 
-    // Also collect link: entries from importers section as separate instances
-    traverseLockfile(this.lockfile, (context) => {
-      const { key, value, path } = context;
+  /**
+   * Find packages that have multiple instances with different dependencies (tree-based)
+   */
+  async findDuplicates(
+    options: DuplicatesOptions = {},
+  ): Promise<DuplicateInstance[]> {
+    const { showAll = false, packageFilter, projectFilter } = options;
 
-      if (path[0] === "importers" && path.length === 4 && path[1]) {
-        const importerPath = path[1];
-        const packageName = key;
-        const depInfo = value as { specifier: string; version: string };
+    // Collect all package instances from trees (only actually resolved packages)
+    const instancesMap = await this.collectInstancesFromTrees();
+    const packageGroups = new Map<string, string[]>(); // packageName -> instanceIds
 
-        // Check if this is a link dependency
-        if (depInfo?.version?.startsWith("link:")) {
-          const linkInstanceId = `${packageName}@${depInfo.version}`;
-          const parsed = parsePackageString(linkInstanceId);
-
-          if (parsed.name) {
-            // Create synthetic instance for the link entry
-            const linkInstance: PackageInstance = {
-              id: linkInstanceId,
-              packageName: parsed.name,
-              version: parsed.version || depInfo.version,
-              dependencies: {}, // Link entries don't have their own dependencies
-              projects: new Set([importerPath]),
-            };
-
-            instancesMap.set(linkInstanceId, linkInstance);
-
-            // Group by package name
-            if (!packageGroups.has(parsed.name)) {
-              packageGroups.set(parsed.name, []);
-            }
-            packageGroups.get(parsed.name)!.push(linkInstanceId);
-          }
-        }
+    // Group instances by package name
+    for (const [instanceId, instance] of instancesMap.entries()) {
+      if (!packageGroups.has(instance.packageName)) {
+        packageGroups.set(instance.packageName, []);
       }
-    });
-
-    // Now find where each instance is used
-    traverseLockfile(this.lockfile, (context) => {
-      const { key, value, path } = context;
-
-      if (path[0] === "importers" && path.length === 4) {
-        const importerPath = path[1];
-        const packageName = key;
-        const depInfo = value as { specifier: string; version: string };
-
-        // The version field contains the actual instance ID
-        const versionString = depInfo.version;
-
-        // Check all instances of this package to see which one matches
-        const packageInstances = packageGroups.get(packageName) || [];
-        for (const instanceId of packageInstances) {
-          // Match either exact instance ID or base version
-          if (
-            versionString === instanceId ||
-            versionString?.startsWith(instanceId + "(") ||
-            instanceId === `${packageName}@${versionString}`
-          ) {
-            const instance = instancesMap.get(instanceId);
-            if (instance) {
-              instance.projects.add(importerPath || ".");
-            }
-          }
-        }
-      }
-    });
+      packageGroups.get(instance.packageName)!.push(instanceId);
+    }
 
     // Build duplicate instances
     const duplicates: DuplicateInstance[] = [];
@@ -351,46 +356,48 @@ export class DuplicatesUsecase {
 
       // Only include if there are multiple instances or showAll is true
       if (instanceIds.length > 1 || showAll) {
-        const instances = await Promise.all(instanceIds.map(async (id) => {
-          const instance = instancesMap.get(id)!;
+        const instances = await Promise.all(
+          instanceIds.map(async (id) => {
+            const instance = instancesMap.get(id)!;
 
-          // Use dependency tracker to get all importers (direct + transitive)
-          let allImporters = await this.dependencyTracker.getImportersForPackage(id);
+            // Use projects from tree-based collection (only actually resolved packages)
+            let allImporters = Array.from(instance.projects);
 
-          // Apply project filter if specified
-          if (projectFilter) {
-            allImporters = allImporters.filter((imp) =>
-              projectFilter.includes(imp),
-            );
-          }
-
-          // Generate dependency info for first project if requested
-          let dependencyInfo = undefined;
-          if (allImporters.length > 0) {
-            // Use first project as representative for dependency path
-            const firstProject = allImporters[0];
-            if (firstProject) {
-              dependencyInfo = await this.getInstanceDependencyInfo(
-                firstProject,
-                packageName,
-                instance.id,
-                options.maxDepth || 10,
+            // Apply project filter if specified
+            if (projectFilter) {
+              allImporters = allImporters.filter((imp) =>
+                projectFilter.includes(imp),
               );
             }
-          }
 
-          return {
-            id: instance.id,
-            version: instance.version,
-            dependencies: instance.dependencies,
-            projects:
-              allImporters.length > 0
-                ? allImporters
-                : Array.from(instance.projects),
-            dependencyType: this.getDependencyType(packageName, allImporters),
-            dependencyInfo,
-          };
-        }));
+            // Generate dependency info for first project if requested
+            let dependencyInfo = undefined;
+            if (allImporters.length > 0) {
+              // Use first project as representative for dependency path
+              const firstProject = allImporters[0];
+              if (firstProject) {
+                dependencyInfo = await this.getInstanceDependencyInfo(
+                  firstProject,
+                  packageName,
+                  instance.id,
+                  options.maxDepth || 10,
+                );
+              }
+            }
+
+            return {
+              id: instance.id,
+              version: instance.version,
+              dependencies: instance.dependencies,
+              projects:
+                allImporters.length > 0
+                  ? allImporters
+                  : Array.from(instance.projects),
+              dependencyType: this.getDependencyType(packageName, allImporters),
+              dependencyInfo,
+            };
+          }),
+        );
 
         // Filter out instances that have no matching projects
         const filteredInstances = instances.filter(
@@ -431,7 +438,10 @@ export class DuplicatesUsecase {
     const globalDuplicates = await this.findDuplicates(options);
 
     // Phase 1: Ensure all instances have complete dependency info
-    const enrichedDuplicates = await this.enrichInstancesWithDependencyInfo(globalDuplicates, options);
+    const enrichedDuplicates = await this.enrichInstancesWithDependencyInfo(
+      globalDuplicates,
+      options,
+    );
 
     // Phase 2: Group by importer with robust file variant detection
     const importerGroups = new Map<string, DuplicateInstance[]>();
@@ -449,7 +459,7 @@ export class DuplicatesUsecase {
           const projectKey = this.detectFileVariantProjectKey(
             instance,
             project,
-            duplicate.packageName
+            duplicate.packageName,
           );
 
           if (!importerGroups.has(projectKey)) {
@@ -486,7 +496,7 @@ export class DuplicatesUsecase {
     for (const [importerPath, packages] of importerGroups.entries()) {
       // Within each project, group packages by name and check if any package has multiple versions
       const packagesByName = new Map<string, any[]>();
-      
+
       for (const pkg of packages) {
         if (!packagesByName.has(pkg.packageName)) {
           packagesByName.set(pkg.packageName, []);
@@ -504,26 +514,32 @@ export class DuplicatesUsecase {
         }
 
         // Check if we have multiple versions (different instance IDs = potential duplicates)
-        const uniqueVersions = new Set(allInstances.map(inst => {
-          // Extract base version without peer deps
-          const parsed = parsePackageString(inst.id);
-          return parsed.version || inst.version;
-        }));
+        const uniqueVersions = new Set(
+          allInstances.map((inst) => {
+            // Extract base version without peer deps
+            const parsed = parsePackageString(inst.id);
+            return parsed.version || inst.version;
+          }),
+        );
 
         const isDuplicate = uniqueVersions.size > 1; // Multiple versions = duplicate
 
         if (isDuplicate || options.showAll) {
-          const enrichedInstances = await Promise.all(allInstances.map(async (inst) => ({
-            id: inst.id,
-            version: inst.version,
-            dependencies: inst.dependencies,
-            dependencyInfo: inst.dependencyInfo || await this.getInstanceDependencyInfo(
-              importerPath,
-              packageName,
-              inst.id,
-              options.maxDepth || 10,
-            ),
-          })));
+          const enrichedInstances = await Promise.all(
+            allInstances.map(async (inst) => ({
+              id: inst.id,
+              version: inst.version,
+              dependencies: inst.dependencies,
+              dependencyInfo:
+                inst.dependencyInfo ||
+                (await this.getInstanceDependencyInfo(
+                  importerPath,
+                  packageName,
+                  inst.id,
+                  options.maxDepth || 10,
+                )),
+            })),
+          );
 
           duplicatePackages.push({
             packageName,
@@ -551,11 +567,13 @@ export class DuplicatesUsecase {
         .filter((pkg) => pkg.instances.length > 0) // Remove packages with no instances after filtering
         .filter((pkg) => {
           // Check if this is still a duplicate after omit filtering
-          const uniqueVersionsAfterOmit = new Set(pkg.instances.map((inst: any) => {
-            const parsed = parsePackageString(inst.id);
-            return parsed.version || inst.version;
-          }));
-          
+          const uniqueVersionsAfterOmit = new Set(
+            pkg.instances.map((inst: any) => {
+              const parsed = parsePackageString(inst.id);
+              return parsed.version || inst.version;
+            }),
+          );
+
           return uniqueVersionsAfterOmit.size > 1 || options.showAll;
         });
 
@@ -611,7 +629,6 @@ export class DuplicatesUsecase {
     instanceId: string,
     maxDepth: number = 10,
   ): Promise<DependencyInfo> {
-    console.log(`[DEBUG] getInstanceDependencyInfo: ${importerPath} -> ${instanceId}`);
     const path = await this.dependencyTracker.getDependencyPath(
       importerPath,
       instanceId,
@@ -627,13 +644,10 @@ export class DuplicatesUsecase {
     const typeSummary =
       path.length > 0 ? this.getTypeSummaryFromPath(path) : "transitive";
 
-    console.log(`[DEBUG] Dependency info for ${instanceId}: path length=${path.length}, allPaths length=${allPaths.length}`);
-
-    const finalPath = path.length > 0
-      ? path
-      : [{ package: instanceId, type: "transitive", specifier: "unknown" }];
-
-    console.log(`[DEBUG] Returning dependencyInfo with path length=${finalPath.length}:`, finalPath.map(p => p.package).join(' -> '));
+    const finalPath =
+      path.length > 0
+        ? path
+        : [{ package: instanceId, type: "transitive", specifier: "unknown" }];
 
     return {
       typeSummary,
@@ -724,9 +738,9 @@ export class DuplicatesUsecase {
     }
 
     return formatDuplicates(
-      duplicates, 
-      true, 
-      showDependencyTree, 
+      duplicates,
+      true,
+      showDependencyTree,
       compactTreeDepth,
     );
   }

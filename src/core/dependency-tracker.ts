@@ -114,16 +114,11 @@ export class DependencyTracker {
 
       this.dependencyTrees = {};
 
-      console.log(`[DEBUG] hierarchyResult keys:`, Object.keys(hierarchyResult));
-
       for (const [projectDir, hierarchy] of Object.entries(hierarchyResult)) {
-        const importerId = projectDir === this.lockfileDir ? "." : path.relative(this.lockfileDir, projectDir);
-
-        console.log(`[DEBUG] Processing ${projectDir} -> ${importerId}`, {
-          deps: hierarchy.dependencies?.length || 0,
-          devDeps: hierarchy.devDependencies?.length || 0,
-          optionalDeps: hierarchy.optionalDependencies?.length || 0
-        });
+        const importerId =
+          projectDir === this.lockfileDir
+            ? "."
+            : path.relative(this.lockfileDir, projectDir);
 
         const allNodes: PackageNode[] = [
           ...(hierarchy.dependencies || []),
@@ -132,15 +127,13 @@ export class DependencyTracker {
         ];
 
         this.dependencyTrees[importerId] = allNodes;
-        console.log(`[DEBUG] Tree for ${importerId}: ${allNodes.length} nodes, first 3:`,
-          allNodes.slice(0, 3).map(n => `${n.name}@${n.version}`));
       }
-
     } catch (error) {
-      throw new Error(`buildDependenciesHierarchy failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `buildDependenciesHierarchy failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
-
 
   /**
    * Build dependency map from pnpm's trees
@@ -211,7 +204,10 @@ export class DependencyTracker {
             depInfo.version,
           );
 
-          if (resolvedImporter && this.getLockfile().importers?.[resolvedImporter]) {
+          if (
+            resolvedImporter &&
+            this.getLockfile().importers?.[resolvedImporter]
+          ) {
             if (!this.linkedDependencies.has(importerPath)) {
               this.linkedDependencies.set(importerPath, []);
             }
@@ -392,7 +388,6 @@ export class DependencyTracker {
     }
   }
 
-
   /**
    * Get all importers that use a given package (directly or transitively)
    */
@@ -443,7 +438,9 @@ export class DependencyTracker {
   /**
    * Get linked dependencies for a given importer
    */
-  async getLinkedDependencies(importerPath: string): Promise<LinkedDependencyInfo[]> {
+  async getLinkedDependencies(
+    importerPath: string,
+  ): Promise<LinkedDependencyInfo[]> {
     await this.initialize();
 
     return this.linkedDependencies.get(importerPath) || [];
@@ -474,7 +471,18 @@ export class DependencyTracker {
    * Get package or snapshot data by ID
    */
   getPackageOrSnapshotData(packageId: string): any {
-    return this.getLockfile().packages?.[packageId] || this.getLockfile().snapshots?.[packageId];
+    return (
+      this.getLockfile().packages?.[packageId] ||
+      this.getLockfile().snapshots?.[packageId]
+    );
+  }
+
+  /**
+   * Get dependency trees for all importers (after initialization)
+   */
+  async getDependencyTrees(): Promise<Record<string, PackageNode[]>> {
+    await this.initialize();
+    return this.dependencyTrees;
   }
 
   /**
@@ -487,23 +495,19 @@ export class DependencyTracker {
     await this.initialize();
 
     const tree = this.dependencyTrees[importerPath];
-    console.log(`[DEBUG] getDependencyPath: ${importerPath} -> ${packageId}, tree size: ${tree?.length || 0}`);
 
     if (!tree) {
       throw new Error(`No dependency tree found for importer: ${importerPath}`);
     }
 
     const path = this.findPathInTree(tree, packageId, []);
-    console.log(`[DEBUG] findPathInTree result:`, path ? `${path.length} steps` : 'null');
 
     if (!path) {
-      // List first few packages in tree for debugging
-      const treePackages = tree.slice(0, 5).map(n => `${n.name}@${n.version}`);
-      console.log(`[DEBUG] Tree contains:`, treePackages);
-      throw new Error(`Dependency path not found for package ${packageId} in importer ${importerPath}`);
+      throw new Error(
+        `Dependency path not found for package ${packageId} in importer ${importerPath}`,
+      );
     }
 
-    console.log(`[DEBUG] getDependencyPath returning ${path.length} steps:`, path.map(p => p.package).join(' -> '));
     return path;
   }
 
@@ -513,31 +517,39 @@ export class DependencyTracker {
   private findPathInTree(
     nodes: PackageNode[],
     targetPackageId: string,
-    currentPath: DependencyPathStep[]
+    currentPath: DependencyPathStep[],
   ): DependencyPathStep[] | null {
     for (const node of nodes) {
       const nodeId = `${node.name}@${node.version}`;
 
       const step: DependencyPathStep = {
         package: nodeId,
-        type: node.isPeer ? "peerDependencies" : node.dev ? "devDependencies" : node.optional ? "optionalDependencies" : "dependencies",
-        specifier: node.version
+        type: node.isPeer
+          ? "peerDependencies"
+          : node.dev
+            ? "devDependencies"
+            : node.optional
+              ? "optionalDependencies"
+              : "dependencies",
+        specifier: node.version,
       };
 
       const newPath = [...currentPath, step];
 
       const nameMatch = node.name === parsePackageString(targetPackageId).name;
-      const exactMatch = nodeId === targetPackageId || nodeId.startsWith(targetPackageId);
-
-      console.log(`[DEBUG] findPath: checking ${nodeId} vs ${targetPackageId}, nameMatch=${nameMatch}, exactMatch=${exactMatch}, currentDepth=${currentPath.length}`);
+      const exactMatch =
+        nodeId === targetPackageId || nodeId.startsWith(targetPackageId);
 
       if (exactMatch || nameMatch) {
-        console.log(`[DEBUG] findPath: FOUND! Returning path with ${newPath.length} steps`);
         return newPath;
       }
 
       if (node.dependencies) {
-        const childPath = this.findPathInTree(node.dependencies, targetPackageId, newPath);
+        const childPath = this.findPathInTree(
+          node.dependencies,
+          targetPackageId,
+          newPath,
+        );
         if (childPath) return childPath;
       }
     }
@@ -570,7 +582,7 @@ export class DependencyTracker {
   private findAllPathsInTree(
     nodes: PackageNode[],
     targetPackageId: string,
-    currentPath: DependencyPathStep[]
+    currentPath: DependencyPathStep[],
   ): DependencyPathStep[][] {
     const paths: DependencyPathStep[][] = [];
 
@@ -579,21 +591,32 @@ export class DependencyTracker {
 
       const step: DependencyPathStep = {
         package: nodeId,
-        type: node.isPeer ? "peerDependencies" : node.dev ? "devDependencies" : node.optional ? "optionalDependencies" : "dependencies",
-        specifier: node.version
+        type: node.isPeer
+          ? "peerDependencies"
+          : node.dev
+            ? "devDependencies"
+            : node.optional
+              ? "optionalDependencies"
+              : "dependencies",
+        specifier: node.version,
       };
 
       const newPath = [...currentPath, step];
 
       const nameMatch = node.name === parsePackageString(targetPackageId).name;
-      const exactMatch = nodeId === targetPackageId || nodeId.startsWith(targetPackageId);
+      const exactMatch =
+        nodeId === targetPackageId || nodeId.startsWith(targetPackageId);
 
       if (exactMatch || nameMatch) {
         paths.push(newPath);
       }
 
       if (node.dependencies) {
-        const childPaths = this.findAllPathsInTree(node.dependencies, targetPackageId, newPath);
+        const childPaths = this.findAllPathsInTree(
+          node.dependencies,
+          targetPackageId,
+          newPath,
+        );
         paths.push(...childPaths);
       }
     }

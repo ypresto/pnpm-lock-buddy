@@ -67,19 +67,22 @@ function getTypeShortCode(type: string, isOptional = false): string {
  * Extract canonical version identifier for version mapping
  * Handles normalization of link paths and file paths
  */
-function extractCanonicalVersion(packageId: string, packageName: string): string {
+function extractCanonicalVersion(
+  packageId: string,
+  packageName: string,
+): string {
   if (packageId.includes("@file:")) {
     // For file dependencies, use the package name as canonical identifier
     // since they all point to the same local package
     return `file:${packageName}`;
   } else if (packageId.includes("@link:")) {
     // For link dependencies, normalize to canonical package name
-    // Both "link:../bakuraku-fetch" and "link:../../packages/webapp/bakuraku-fetch" 
+    // Both "link:../bakuraku-fetch" and "link:../../packages/webapp/bakuraku-fetch"
     // should map to the same canonical identifier
     return `link:${packageName}`;
   } else {
     // Handle standard version dependencies like "react@19.1.1"
-    const atIndex = packageId.lastIndexOf('@');
+    const atIndex = packageId.lastIndexOf("@");
     if (atIndex > 0) {
       return packageId.substring(atIndex + 1);
     } else {
@@ -99,7 +102,7 @@ function formatPathsWithPrefixMerging(
   targetPackageName?: string,
 ): string[] {
   const lines: string[] = [];
-  
+
   // Sort paths by prefix for efficient merging - O(n log n)
   allPaths.sort((a, b) => {
     for (let i = 0; i < Math.min(a.length, b.length); i++) {
@@ -113,20 +116,22 @@ function formatPathsWithPrefixMerging(
 
   // Track what we've already displayed to enable merging
   const displayedSegments = new Set<string>();
-  
+
   // Process each path - O(n*m) where n=paths, m=avg depth
   for (let pathIndex = 0; pathIndex < allPaths.length; pathIndex++) {
     const currentPath = allPaths[pathIndex];
     if (!currentPath) continue;
-    
+
     for (let i = 0; i < currentPath.length; i++) {
       const step = currentPath[i];
       if (!step) continue;
 
       // Create segment key for this position
-      const segmentKey = currentPath.slice(0, i + 1)
-        .map(s => `${s?.package}@${s?.type}`).join("→");
-      
+      const segmentKey = currentPath
+        .slice(0, i + 1)
+        .map((s) => `${s?.package}@${s?.type}`)
+        .join("→");
+
       // Skip if we've already shown this segment
       if (displayedSegments.has(segmentKey)) {
         continue;
@@ -134,37 +139,45 @@ function formatPathsWithPrefixMerging(
       displayedSegments.add(segmentKey);
 
       // Apply compact tree logic
-      const shouldCompact = compactTreeDepth !== undefined && currentPath.length > compactTreeDepth;
+      const shouldCompact =
+        compactTreeDepth !== undefined && currentPath.length > compactTreeDepth;
       if (shouldCompact && i > 1 && i < currentPath.length - 2) {
         continue; // Skip middle segments in compact mode
       }
 
       const isLinked = step.specifier?.startsWith("link:");
       const typeCode = isLinked ? "link:" : getTypeShortCode(step.type);
-      
+
       // Calculate if this is the last occurrence of this depth across all paths
-      const isLastAtThisDepth = !allPaths.some((otherPath, otherIndex) => 
-        otherIndex > pathIndex && 
-        otherPath.length > i &&
-        otherPath.slice(0, i).every((otherStep, j) => 
-          currentPath[j] && 
-          otherStep.package === currentPath[j]!.package &&
-          otherStep.type === currentPath[j]!.type
-        )
+      const isLastAtThisDepth = !allPaths.some(
+        (otherPath, otherIndex) =>
+          otherIndex > pathIndex &&
+          otherPath.length > i &&
+          otherPath
+            .slice(0, i)
+            .every(
+              (otherStep, j) =>
+                currentPath[j] &&
+                otherStep.package === currentPath[j]!.package &&
+                otherStep.type === currentPath[j]!.type,
+            ),
       );
-      
+
       // Generate tree connector
       const connector = isLastAtThisDepth ? "└─" : "├─";
       const indentation = "│  ".repeat(i);
       const prefix = `${basePrefix}    ${indentation}${connector}`;
-      
+
       const typeLabel = typeCode ? `(${typeCode})` : "";
       const isLeaf = i === currentPath.length - 1;
       let packageName = isLeaf ? versionColor(step.package) : step.package;
-      
+
       // Add version number for target - use canonical version extraction
       if (versionMap && isLeaf && targetPackageName) {
-        const canonicalVersion = extractCanonicalVersion(step.package, targetPackageName);
+        const canonicalVersion = extractCanonicalVersion(
+          step.package,
+          targetPackageName,
+        );
         const versionKey = `${targetPackageName}@${canonicalVersion}`;
         const versionNum = versionMap.get(versionKey);
         if (versionNum) {
@@ -176,7 +189,7 @@ function formatPathsWithPrefixMerging(
       lines.push(`${prefix}${typeLabel}${separator}${packageName}`);
     }
   }
-  
+
   return lines;
 }
 
@@ -208,8 +221,9 @@ function formatDependencyTree(
   } else {
     // Single path logic (keep original fast approach)
     const lines: string[] = [];
-    const shouldCompact = compactTreeDepth !== undefined && path.length > compactTreeDepth;
-    
+    const shouldCompact =
+      compactTreeDepth !== undefined && path.length > compactTreeDepth;
+
     for (let i = 0; i < path.length; i++) {
       const step = path[i];
       if (!step) continue;
@@ -226,7 +240,8 @@ function formatDependencyTree(
 
       let prefix = "";
       if (i === 0) {
-        prefix = i === path.length - 1 ? `${basePrefix}    └─` : `${basePrefix}    ├─`;
+        prefix =
+          i === path.length - 1 ? `${basePrefix}    └─` : `${basePrefix}    ├─`;
       } else {
         const isLast = i === path.length - 1;
         const parentSpacing = `${basePrefix}    ` + "│  ".repeat(i);
@@ -236,10 +251,13 @@ function formatDependencyTree(
       const typeLabel = typeCode ? `(${typeCode})` : "";
       const isLeaf = i === path.length - 1;
       let packageName = isLeaf ? versionColor(step.package) : step.package;
-      
+
       // Add version number for target - use canonical version extraction
       if (versionMap && isLeaf && targetPackageName) {
-        const canonicalVersion = extractCanonicalVersion(step.package, targetPackageName);
+        const canonicalVersion = extractCanonicalVersion(
+          step.package,
+          targetPackageName,
+        );
         const versionKey = `${targetPackageName}@${canonicalVersion}`;
         const versionNum = versionMap.get(versionKey);
         if (versionNum) {
@@ -250,7 +268,7 @@ function formatDependencyTree(
       const separator = typeLabel ? "─ " : "── ";
       lines.push(`${prefix}${typeLabel}${separator}${packageName}`);
     }
-    
+
     return lines;
   }
 }
@@ -273,9 +291,12 @@ export function formatDuplicates(
   for (const dup of duplicates) {
     for (const instance of dup.instances) {
       // Use canonical version extraction to handle different relative paths
-      const canonicalVersion = extractCanonicalVersion(instance.id, dup.packageName);
+      const canonicalVersion = extractCanonicalVersion(
+        instance.id,
+        dup.packageName,
+      );
       const versionKey = `${dup.packageName}@${canonicalVersion}`;
-      
+
       if (!versionMap.has(versionKey)) {
         versionMap.set(versionKey, versionCounter++);
       }
@@ -294,7 +315,6 @@ export function formatDuplicates(
     );
 
     for (const instance of dup.instances) {
-      console.log(`[DEBUG] Formatter: showDependencyTree=${showDependencyTree}, has dependencyInfo=${!!instance.dependencyInfo}, path length=${instance.dependencyInfo?.path?.length || 0}`);
       if (showDependencyTree && instance.dependencyInfo) {
         for (const project of instance.projects) {
           lines.push(`  ${project}:`);
@@ -315,13 +335,16 @@ export function formatDuplicates(
         const typeInfo = instance.dependencyType
           ? ` (${instance.dependencyType})`
           : "";
-        
+
         // Use canonical version extraction for consistency
-        const canonicalVersion = extractCanonicalVersion(instance.id, dup.packageName);
+        const canonicalVersion = extractCanonicalVersion(
+          instance.id,
+          dup.packageName,
+        );
         const versionKey = `${dup.packageName}@${canonicalVersion}`;
         const versionNum = versionMap.get(versionKey);
         const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
-        
+
         lines.push(`  ${displayVersion}${typeInfo}`);
 
         if (instance.projects.length > 0) {
@@ -338,7 +361,7 @@ export function formatDuplicates(
  * Clean up file variant project key for better readability
  */
 function cleanFileVariantProjectKey(projectKey: string): string {
-  if (projectKey.includes('@file:')) {
+  if (projectKey.includes("@file:")) {
     // Extract just the file path and peer deps part
     // @layerone/foundation-react@file:packages/webapp/foundation-react(peer-deps)
     // -> packages/webapp/foundation-react(peer-deps)
@@ -369,9 +392,12 @@ export function formatPerProjectDuplicates(
     for (const pkg of project.duplicatePackages) {
       for (const instance of pkg.instances) {
         // Use canonical version extraction to handle different relative paths
-        const canonicalVersion = extractCanonicalVersion(instance.id, pkg.packageName);
+        const canonicalVersion = extractCanonicalVersion(
+          instance.id,
+          pkg.packageName,
+        );
         const versionKey = `${pkg.packageName}@${canonicalVersion}`;
-        
+
         if (!versionMap.has(versionKey)) {
           versionMap.set(versionKey, versionCounter++);
         }
@@ -425,16 +451,13 @@ export function formatPerProjectDuplicates(
       for (let i = 0; i < group.instances.length; i++) {
         const instance = group.instances[i];
         const isLast = i === group.instances.length - 1;
-        
-        console.log(`[DEBUG] PerProject Formatter: showDependencyTree=${showDependencyTree}, has dependencyInfo=${!!instance.dependencyInfo}, path length=${instance.dependencyInfo?.path?.length || 0}`);
+
         if (showDependencyTree && instance.dependencyInfo) {
           const { path } = instance.dependencyInfo;
 
           const hasRealPath =
             path.length > 1 ||
             (path.length === 1 && path[0].type !== "transitive");
-
-          console.log(`[DEBUG] hasRealPath=${hasRealPath}, path:`, path.map((p: any) => p.package).join(' -> '));
 
           if (hasRealPath) {
             lines.push(
@@ -451,22 +474,28 @@ export function formatPerProjectDuplicates(
             );
           } else {
             // For instances without proper dependency paths, create a minimal tree structure
-            const canonicalVersion = extractCanonicalVersion(instance.id, packageName);
+            const canonicalVersion = extractCanonicalVersion(
+              instance.id,
+              packageName,
+            );
             const versionKey = `${packageName}@${canonicalVersion}`;
             const versionNum = versionMap.get(versionKey);
             const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
-            
+
             // Use tree formatting even for simple instances
             const treePrefix = isLast ? "    └───" : "    ├───";
             lines.push(`${treePrefix} ${displayVersion}`);
           }
         } else {
           // Use canonical version extraction for consistency and add tree formatting
-          const canonicalVersion = extractCanonicalVersion(instance.id, packageName);
+          const canonicalVersion = extractCanonicalVersion(
+            instance.id,
+            packageName,
+          );
           const versionKey = `${packageName}@${canonicalVersion}`;
           const versionNum = versionMap.get(versionKey);
           const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
-          
+
           // Always use tree formatting in per-project mode
           const treePrefix = isLast ? "    └───" : "    ├───";
           lines.push(`${treePrefix} ${displayVersion}`);
@@ -550,7 +579,7 @@ export function formatAsTree(
 
       lines.push(`  ${versionColor(packageId)}`);
       lines.push(`    => ${packageColor(result.path.join(" > "))}`);
-      
+
       if (result.specifier) {
         lines.push(`       specifier: ${specifierColor(result.specifier)}`);
       }

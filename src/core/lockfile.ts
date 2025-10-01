@@ -3,7 +3,10 @@ import path from "path";
 import yaml from "js-yaml";
 import type { LockfileFile } from "@pnpm/lockfile.types";
 
-export type PnpmLockfile = Pick<LockfileFile, "importers" | "packages" | "snapshots" | "lockfileVersion">;
+export type PnpmLockfile = Pick<
+  LockfileFile,
+  "importers" | "packages" | "snapshots" | "lockfileVersion"
+>;
 
 // Cache for loaded lockfiles
 const lockfileCache = new Map<string, PnpmLockfile>();

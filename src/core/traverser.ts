@@ -166,7 +166,8 @@ export function findPackageOccurrences(
     if (
       context.path[0] === "packages" &&
       context.path.length === 2 &&
-      (context.key === packageName || context.key?.startsWith(`${packageName}@`))
+      (context.key === packageName ||
+        context.key?.startsWith(`${packageName}@`))
     ) {
       occurrences.push(context);
     }
@@ -175,7 +176,8 @@ export function findPackageOccurrences(
     if (
       context.path[0] === "snapshots" &&
       context.path.length === 2 &&
-      (context.key === packageName || context.key?.startsWith(`${packageName}@`))
+      (context.key === packageName ||
+        context.key?.startsWith(`${packageName}@`))
     ) {
       occurrences.push(context);
     }

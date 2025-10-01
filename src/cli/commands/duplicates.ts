@@ -28,10 +28,7 @@ export function createDuplicatesCommand(): Command {
       "--omit <types...>",
       'Omit dependency types: "dev", "optional", "peer" (e.g., --omit=dev --omit=optional)',
     )
-    .option(
-      "--deps",
-      "Show dependency tree paths from root to target packages",
-    )
+    .option("--deps", "Show dependency tree paths from root to target packages")
     .option(
       "--deps-depth <number>",
       "Limit dependency tree display depth (e.g., --deps-depth=3 shows max 3 levels with '...' for deeper paths)",
@@ -55,31 +52,38 @@ export function createDuplicatesCommand(): Command {
       try {
         // Parse deps options
         const showDependencyTree = options.deps === true;
-        const compactTreeDepth = options.depsDepth ? Number(options.depsDepth) : undefined;
+        const compactTreeDepth = options.depsDepth
+          ? Number(options.depsDepth)
+          : undefined;
 
         // Determine lockfile path
-        const lockfilePath = options.file || process.env.PNPM_LOCK_PATH || "pnpm-lock.yaml";
+        const lockfilePath =
+          options.file || process.env.PNPM_LOCK_PATH || "pnpm-lock.yaml";
 
         // Load lockfile for validation
         const lockfile = loadLockfile(lockfilePath);
 
         // Create usecase with file path
         const depth = parseInt(options.depth);
-        const duplicatesUsecase = new DuplicatesUsecase(lockfilePath, lockfile, depth);
+        const duplicatesUsecase = new DuplicatesUsecase(
+          lockfilePath,
+          lockfile,
+          depth,
+        );
 
         // Validate project filter if specified
         if (options.project && options.project.length > 0) {
           const availableProjects = Object.keys(lockfile.importers || {});
           const missingProjects = options.project.filter(
-            (project: string) => !availableProjects.includes(project)
+            (project: string) => !availableProjects.includes(project),
           );
 
           if (missingProjects.length > 0) {
             console.error(
               chalk.red(
                 `Error: Project${missingProjects.length > 1 ? "s" : ""} not found: ${missingProjects.join(", ")}\\n` +
-                `Available projects:\\n${availableProjects.map(p => `  - ${p}`).join("\\n")}`
-              )
+                  `Available projects:\\n${availableProjects.map((p) => `  - ${p}`).join("\\n")}`,
+              ),
             );
             process.exit(1);
           }
@@ -106,7 +110,7 @@ export function createDuplicatesCommand(): Command {
         }
 
         let hasDuplicates = false;
-        
+
         // Auto-detect if we should use per-project format when --project is specified
         let usePerProject = options.perProject;
         if (options.project && !options.perProject) {
@@ -117,11 +121,16 @@ export function createDuplicatesCommand(): Command {
             projectFilter: options.project,
             omitTypes: options.omit,
           });
-          
+
           // Check if any package has file variants or multiple resolution contexts
           for (const duplicate of globalDuplicates) {
             for (const instance of duplicate.instances) {
-              if (instance.dependencyInfo && instance.dependencyInfo.path.some(step => step.package.includes('@file:'))) {
+              if (
+                instance.dependencyInfo &&
+                instance.dependencyInfo.path.some((step) =>
+                  step.package.includes("@file:"),
+                )
+              ) {
                 usePerProject = true;
                 break;
               }
