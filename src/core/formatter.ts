@@ -116,6 +116,8 @@ function formatPathsWithPrefixMerging(
 
   // Track what we've already displayed to enable merging
   const displayedSegments = new Set<string>();
+  // Track which segments are last children (used └─)
+  const lastChildSegments = new Set<string>();
 
   // Process each path - O(n*m) where n=paths, m=avg depth
   for (let pathIndex = 0; pathIndex < allPaths.length; pathIndex++) {
@@ -165,7 +167,23 @@ function formatPathsWithPrefixMerging(
 
       // Generate tree connector
       const connector = isLastAtThisDepth ? "└─" : "├─";
-      const indentation = "│  ".repeat(i);
+
+      // Track if this is a last child
+      if (isLastAtThisDepth) {
+        lastChildSegments.add(segmentKey);
+      }
+
+      // Build indentation, skipping │ for levels that are last children
+      let indentation = "";
+      for (let depth = 0; depth < i; depth++) {
+        const depthKey = currentPath
+          .slice(0, depth + 1)
+          .map((s) => `${s?.package}@${s?.type}`)
+          .join("→");
+        // Only add │ if this ancestor is NOT a last child
+        indentation += lastChildSegments.has(depthKey) ? "   " : "│  ";
+      }
+
       const prefix = `${basePrefix}    ${indentation}${connector}`;
 
       const typeLabel = typeCode ? `(${typeCode})` : "";
