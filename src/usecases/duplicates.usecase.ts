@@ -15,7 +15,6 @@ export interface DuplicatesOptions {
   packageFilter?: string[];
   projectFilter?: string[];
   omitTypes?: string[]; // "dev", "optional", "peer"
-  maxDepth?: number; // Maximum depth for dependency path traversal
 }
 
 export type OutputFormat = "tree" | "json";
@@ -90,7 +89,6 @@ export class DuplicatesUsecase {
    */
   private async enrichInstancesWithDependencyInfo(
     duplicates: DuplicateInstance[],
-    options: DuplicatesOptions,
   ): Promise<DuplicateInstance[]> {
     return Promise.all(
       duplicates.map(async (duplicate) => ({
@@ -111,7 +109,6 @@ export class DuplicatesUsecase {
                     firstProject,
                     duplicate.packageName,
                     instance.id,
-                    options.maxDepth || 10,
                   ),
                 };
               }
@@ -394,7 +391,6 @@ export class DuplicatesUsecase {
                   firstProject,
                   packageName,
                   instance.id,
-                  options.maxDepth || 10,
                 );
               }
             }
@@ -454,7 +450,6 @@ export class DuplicatesUsecase {
     // Phase 1: Ensure all instances have complete dependency info
     const enrichedDuplicates = await this.enrichInstancesWithDependencyInfo(
       globalDuplicates,
-      options,
     );
 
     // Phase 2: Group by importer with robust file variant detection
@@ -550,7 +545,6 @@ export class DuplicatesUsecase {
                   importerPath,
                   packageName,
                   inst.id,
-                  options.maxDepth || 10,
                 )),
             })),
           );
@@ -641,7 +635,6 @@ export class DuplicatesUsecase {
     importerPath: string,
     _packageName: string,
     instanceId: string,
-    maxDepth: number = 10,
   ): Promise<DependencyInfo> {
     const path = await this.dependencyTracker.getDependencyPath(
       importerPath,
@@ -652,7 +645,6 @@ export class DuplicatesUsecase {
     const allPaths = await this.dependencyTracker.getAllDependencyPaths(
       importerPath,
       instanceId,
-      maxDepth,
     );
 
     const typeSummary =
@@ -691,7 +683,6 @@ export class DuplicatesUsecase {
     perProjectDuplicates: PerProjectDuplicate[],
     format: OutputFormat = "tree",
     showDependencyTree = false,
-    _maxDepth = 10,
     compactTreeDepth?: number,
   ): string {
     if (format === "json") {

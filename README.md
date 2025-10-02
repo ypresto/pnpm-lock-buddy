@@ -94,7 +94,7 @@ pnpm-lock-buddy duplicates react lodash --exit-code
 - `--project <projects>` - Filter by specific project paths (comma-separated, e.g., `"apps/web,packages/ui"`)
 - `--deps` - Show dependency tree paths from root to target packages
 - `--deps-depth <number>` - Limit dependency tree display depth (shows `...` for deeper paths)
-- `--depth <number>` - Depth for building dependency tree (default: 10, use higher for deep monorepos)
+- `--depth <number>` - Depth for building dependency tree (default: 10, increase for deep monorepos)
 - `--omit <types...>` - Omit dependency types: dev, optional, peer (e.g., `--omit dev --omit optional`)
 - `--exit-code` - Exit with code 1 if duplicate packages are found (useful for CI/CD)
 - `-o, --output <format>` - Output format: tree, json (default: tree)

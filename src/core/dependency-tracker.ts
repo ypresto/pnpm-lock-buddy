@@ -534,7 +534,6 @@ export class DependencyTracker {
   async getAllDependencyPaths(
     importerPath: string,
     packageId: string,
-    _maxDepth: number = 10,
   ): Promise<DependencyPathStep[][]> {
     await this.initialize();
 
