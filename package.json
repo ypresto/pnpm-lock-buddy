@@ -1,6 +1,6 @@
 {
   "name": "pnpm-lock-buddy",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "CLI tool for analyzing pnpm-lock.yaml files",
   "main": "dist/cli/index.js",
   "type": "module",
