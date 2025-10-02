@@ -57,22 +57,32 @@ Identify packages with multiple installations across your project.
 # Find all duplicates
 pnpm-lock-buddy duplicates
 
-# Filter by specific packages
+# Filter by specific packages (supports wildcards)
 pnpm-lock-buddy duplicates react lodash @types/react
+pnpm-lock-buddy duplicates "react*" "@types/*"
 
 # Group by project (shows which projects have internal duplicates)
 pnpm-lock-buddy duplicates --per-project
 
-# Filter by project
-pnpm-lock-buddy duplicates --project "apps/web"
+# Show dependency tree paths (how packages are included)
+pnpm-lock-buddy duplicates --deps
+pnpm-lock-buddy duplicates --per-project --deps
 
-# Combined filtering
-pnpm-lock-buddy duplicates react --project "apps/web" --per-project
+# Filter by project (comma-separated)
+pnpm-lock-buddy duplicates --project packages/webapp/ui-react
+pnpm-lock-buddy duplicates --project "apps/web,packages/ui"
+
+# Combined filtering with dependency trees
+pnpm-lock-buddy duplicates react --project packages/webapp/ui-react --per-project --deps
+
+# Omit dependency types (dev, optional, peer)
+pnpm-lock-buddy duplicates --omit dev --omit optional
+
+# Limit tree depth for better readability
+pnpm-lock-buddy duplicates --deps --deps-depth 3
 
 # CI/CD: Fail build if duplicates found
 pnpm-lock-buddy duplicates --exit-code
-
-# CI/CD: Check specific packages and fail if duplicates
 pnpm-lock-buddy duplicates react lodash --exit-code
 ```
 
@@ -81,7 +91,11 @@ pnpm-lock-buddy duplicates react lodash --exit-code
 - `-f, --file <path>` - Path to pnpm-lock.yaml file
 - `-a, --all` - Show all packages, not just duplicates
 - `-p, --per-project` - Group duplicates by importer/project instead of globally
-- `--project <projects...>` - Filter by specific importer/project paths
+- `--project <projects>` - Filter by specific project paths (comma-separated, e.g., `"apps/web,packages/ui"`)
+- `--deps` - Show dependency tree paths from root to target packages
+- `--deps-depth <number>` - Limit dependency tree display depth (shows `...` for deeper paths)
+- `--depth <number>` - Depth for building dependency tree (default: 10, use higher for deep monorepos)
+- `--omit <types...>` - Omit dependency types: dev, optional, peer (e.g., `--omit dev --omit optional`)
 - `--exit-code` - Exit with code 1 if duplicate packages are found (useful for CI/CD)
 - `-o, --output <format>` - Output format: tree, json (default: tree)
 
