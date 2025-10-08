@@ -303,10 +303,11 @@ export function formatDuplicates(
 
   const lines: string[] = [];
   const versionMap = new Map<string, number>();
-  let versionCounter = 1;
 
   // Build version mapping using canonical version extraction
+  // Reset counter for each package so numbering is per-package
   for (const dup of duplicates) {
+    let versionCounter = 1;
     for (const instance of dup.instances) {
       // Use canonical version extraction to handle different relative paths
       const canonicalVersion = extractCanonicalVersion(
@@ -403,11 +404,12 @@ export function formatPerProjectDuplicates(
 
   const lines: string[] = [];
   const versionMap = new Map<string, number>();
-  let versionCounter = 1;
 
   // Build version mapping using canonical version extraction
+  // Reset counter for each package so numbering is per-package
   for (const project of perProjectDuplicates) {
     for (const pkg of project.duplicatePackages) {
+      let versionCounter = 1;
       for (const instance of pkg.instances) {
         // Use canonical version extraction to handle different relative paths
         const canonicalVersion = extractCanonicalVersion(
