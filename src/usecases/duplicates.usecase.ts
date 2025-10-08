@@ -399,10 +399,7 @@ export class DuplicatesUsecase {
               id: instance.id,
               version: instance.version,
               dependencies: instance.dependencies,
-              projects:
-                allImporters.length > 0
-                  ? allImporters
-                  : Array.from(instance.projects),
+              projects: projectFilter ? allImporters : Array.from(instance.projects),
               dependencyType: this.getDependencyType(packageName, allImporters),
               dependencyInfo,
             };
@@ -414,11 +411,14 @@ export class DuplicatesUsecase {
           (inst) => inst.projects.length > 0,
         );
 
+        // When project filter is applied, check duplicates based on filtered results
+        // Otherwise check based on original instance count
+        const isDuplicate = projectFilter
+          ? filteredInstances.length > 1
+          : instanceIds.length > 1;
+
         // Only include if we have actual instances after filtering (and they are duplicates or showAll)
-        if (
-          filteredInstances.length > 0 &&
-          (filteredInstances.length > 1 || showAll)
-        ) {
+        if (filteredInstances.length > 0 && (isDuplicate || showAll)) {
           // Sort instances by ID for consistent output
           filteredInstances.sort((a, b) => a.id.localeCompare(b.id));
 
