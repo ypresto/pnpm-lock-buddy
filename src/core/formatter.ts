@@ -38,7 +38,9 @@ export interface PerProjectDuplicate {
       dependencies: Record<string, string>;
       dependencyInfo: DependencyInfo;
       dependencyPath?: string;
+      hoisted?: boolean;
     }>;
+    hoistedVersions?: string[];
   }>;
 }
 
@@ -466,7 +468,18 @@ export function formatPerProjectDuplicates(
 
   // Format each package group
   for (const [packageName, importerGroups] of packageGroups.entries()) {
-    lines.push(`\n${packageColor(packageName)}:`);
+    // Get hoisted versions for this package
+    const pkgWithHoist = perProjectDuplicates
+      .flatMap(p => p.duplicatePackages)
+      .find(pkg => pkg.packageName === packageName && pkg.hoistedVersions);
+    const hoistedVersions = pkgWithHoist?.hoistedVersions;
+
+    let header = `\n${packageColor(packageName)}`;
+    if (hoistedVersions && hoistedVersions.length > 0) {
+      const hoistedColor = useColor ? chalk.magenta : (s: string) => s;
+      header += ` ${hoistedColor(`(hoisted: ${hoistedVersions.join(", ")})`)}`;
+    }
+    lines.push(header + ":");
 
     // Sort importer groups by cleaned name for better organization
     const sortedImporterGroups = importerGroups.sort((a, b) => {
@@ -514,7 +527,12 @@ export function formatPerProjectDuplicates(
             );
             const versionKey = `${packageName}@${canonicalVersion}`;
             const versionNum = versionMap.get(versionKey);
-            const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
+
+            const hoistedMark = instance.hoisted
+              ? (useColor ? chalk.magenta(" [HOISTED]") : " [HOISTED]")
+              : "";
+
+            const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}${hoistedMark}`;
 
             // Use tree formatting even for simple instances
             const treePrefix = isLast ? "    └───" : "    ├───";
@@ -528,7 +546,12 @@ export function formatPerProjectDuplicates(
           );
           const versionKey = `${packageName}@${canonicalVersion}`;
           const versionNum = versionMap.get(versionKey);
-          const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
+
+          const hoistedMark = instance.hoisted
+            ? (useColor ? chalk.magenta(" [HOISTED]") : " [HOISTED]")
+            : "";
+
+          const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}${hoistedMark}`;
 
           // Always use tree formatting in per-project mode
           const treePrefix = isLast ? "    └───" : "    ├───";

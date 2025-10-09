@@ -667,12 +667,18 @@ export class DuplicatesUsecase {
                   packageName,
                   inst.id,
                 )),
+              hoisted: inst.hoisted, // Preserve hoisted flag from global duplicates
             })),
           );
+
+          // Get hoistedVersions from the original enrichedDuplicates
+          const originalDup = enrichedDuplicates.find(d => d.packageName === packageName);
+          const hoistedVersions = originalDup?.hoistedVersions;
 
           duplicatePackages.push({
             packageName,
             instances: enrichedInstances,
+            hoistedVersions, // Include hoisted versions
           });
         }
       }
@@ -681,6 +687,7 @@ export class DuplicatesUsecase {
       const filteredDuplicatePackages = duplicatePackages
         .map((pkg) => ({
           packageName: pkg.packageName,
+          hoistedVersions: pkg.hoistedVersions, // Preserve hoisted versions
           instances: pkg.instances.filter((inst: any) => {
             // Apply omit filter to individual instances
             if (!options.omitTypes || options.omitTypes.length === 0) {
