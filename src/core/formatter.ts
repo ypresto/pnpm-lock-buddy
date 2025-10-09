@@ -23,7 +23,9 @@ export interface DuplicateInstance {
     projects: string[];
     dependencyType?: string;
     dependencyInfo?: DependencyInfo;
+    hoisted?: boolean; // Whether this version is hoisted
   }>;
+  hoistedVersions?: string[]; // All hoisted versions for this package
 }
 
 export interface PerProjectDuplicate {
@@ -329,9 +331,15 @@ export function formatDuplicates(
   const numberColor = useColor ? chalk.yellow : (s: string) => s;
 
   for (const dup of duplicates) {
-    lines.push(
-      `\n${packageColor(dup.packageName)} has ${countColor(String(dup.instances.length))} instances:`,
-    );
+    let header = `\n${packageColor(dup.packageName)} has ${countColor(String(dup.instances.length))} instances`;
+
+    // Show hoisted versions info if available
+    if (dup.hoistedVersions && dup.hoistedVersions.length > 0) {
+      const hoistedColor = useColor ? chalk.magenta : (s: string) => s;
+      header += ` ${hoistedColor(`(hoisted: ${dup.hoistedVersions.join(", ")})`)}`;
+    }
+
+    lines.push(header + ":");
 
     for (const instance of dup.instances) {
       if (showDependencyTree && instance.dependencyInfo) {
@@ -362,7 +370,13 @@ export function formatDuplicates(
         );
         const versionKey = `${dup.packageName}@${canonicalVersion}`;
         const versionNum = versionMap.get(versionKey);
-        const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
+
+        // Mark hoisted versions
+        const hoistedMark = instance.hoisted
+          ? (useColor ? chalk.magenta(" [HOISTED]") : " [HOISTED]")
+          : "";
+
+        const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}${hoistedMark}`;
 
         lines.push(`  ${displayVersion}${typeInfo}`);
 

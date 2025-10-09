@@ -4,9 +4,7 @@ import {
   DuplicatesUsecase,
   type OutputFormat,
 } from "../../usecases/duplicates.usecase.js";
-import { loadModulesYaml, detectHoistConflicts } from "../../core/modules-yaml.js";
 import chalk from "chalk";
-import path from "path";
 
 export function createDuplicatesCommand(): Command {
   const command = new Command("duplicates")
@@ -56,63 +54,6 @@ export function createDuplicatesCommand(): Command {
     .option("-o, --output <format>", "Output format: tree, json", "tree")
     .action(async (packageNames: string[], options) => {
       try {
-        // Handle --hoist option
-        if (options.hoist) {
-          const modulesYamlPath = path.join(options.modulesDir, ".modules.yaml");
-
-          console.error(
-            chalk.gray(`Analyzing ${modulesYamlPath} for hoist conflicts...\n`),
-          );
-
-          const modulesYaml = loadModulesYaml(modulesYamlPath);
-          const conflicts = detectHoistConflicts(
-            modulesYaml,
-            packageNames.length > 0 ? packageNames : undefined,
-          );
-
-          if (conflicts.length === 0) {
-            if (options.output !== "json") {
-              console.log(chalk.yellow("No hoist conflicts found."));
-            } else {
-              console.log(JSON.stringify({ conflicts: [] }, null, 2));
-            }
-            return;
-          }
-
-          if (options.output === "json") {
-            console.log(JSON.stringify({ conflicts }, null, 2));
-          } else {
-            console.error(
-              chalk.green(
-                `Found ${conflicts.length} package(s) with multiple hoisted versions:\n`,
-              ),
-            );
-
-            for (const conflict of conflicts) {
-              console.log(`\n${chalk.cyan(conflict.packageName)}:`);
-              console.log(
-                `  ${chalk.red(conflict.versions.length)} versions hoisted:`,
-              );
-
-              for (const version of conflict.versions) {
-                console.log(
-                  `    ${chalk.green(version.version)} - ${chalk.gray(version.fullSpec)}`,
-                );
-              }
-            }
-
-            console.log(
-              `\n${chalk.yellow("⚠ Warning:")} Multiple versions of the same package are hoisted.`,
-            );
-            console.log(
-              chalk.yellow(
-                "This can cause runtime conflicts if code assumes a single version.",
-              ),
-            );
-          }
-          return;
-        }
-
         // Parse deps options
         const showDependencyTree = options.deps === true;
         const compactTreeDepth = options.depsDepth
@@ -227,6 +168,8 @@ export function createDuplicatesCommand(): Command {
               packageFilter: packageNames.length > 0 ? packageNames : undefined,
               projectFilter: projectFilter,
               omitTypes: options.omit,
+              checkHoist: options.hoist,
+              modulesDir: options.modulesDir,
             });
 
           hasDuplicates = perProjectDuplicates.length > 0;
@@ -281,6 +224,8 @@ export function createDuplicatesCommand(): Command {
             packageFilter: packageNames.length > 0 ? packageNames : undefined,
             projectFilter: options.project,
             omitTypes: options.omit,
+            checkHoist: options.hoist,
+            modulesDir: options.modulesDir,
           });
 
           hasDuplicates = duplicates.length > 0;

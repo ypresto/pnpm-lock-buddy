@@ -9,12 +9,16 @@ import {
 import { DependencyTracker } from "../core/dependency-tracker.js";
 import type { DependencyPathStep, DependencyInfo } from "../core/types.js";
 import type { PackageNode } from "@pnpm/reviewing.dependencies-hierarchy";
+import { loadModulesYaml, type ModulesYaml } from "../core/modules-yaml.js";
+import path from "path";
 
 export interface DuplicatesOptions {
   showAll?: boolean;
   packageFilter?: string[];
   projectFilter?: string[];
   omitTypes?: string[]; // "dev", "optional", "peer"
+  checkHoist?: boolean;
+  modulesDir?: string;
 }
 
 export type OutputFormat = "tree" | "json";
@@ -45,14 +49,51 @@ export interface ProjectPackageDuplicate {
 export class DuplicatesUsecase {
   private dependencyTracker: DependencyTracker;
   private lockfile: PnpmLockfile;
+  private lockfilePath: string;
+  private modulesYaml?: ModulesYaml;
+  private hoistedVersions?: Map<string, Set<string>>; // packageName -> Set<version>
 
   constructor(
     lockfilePath: string,
     lockfile: PnpmLockfile,
     depth: number = 10,
   ) {
+    this.lockfilePath = lockfilePath;
     this.dependencyTracker = new DependencyTracker(lockfilePath, depth);
     this.lockfile = lockfile;
+  }
+
+  private loadHoistInfo(modulesDir?: string): void {
+    if (this.modulesYaml) return; // Already loaded
+
+    try {
+      const lockfileDir = path.dirname(this.lockfilePath);
+      const nodeModulesDir = modulesDir || path.join(lockfileDir, "node_modules");
+      const modulesYamlPath = path.join(nodeModulesDir, ".modules.yaml");
+
+      this.modulesYaml = loadModulesYaml(modulesYamlPath);
+      this.hoistedVersions = new Map();
+
+      if (this.modulesYaml.hoistedDependencies) {
+        for (const packageSpec of Object.keys(this.modulesYaml.hoistedDependencies)) {
+          try {
+            const parsed = parsePackageString(packageSpec);
+            if (!this.hoistedVersions.has(parsed.name)) {
+              this.hoistedVersions.set(parsed.name, new Set());
+            }
+            if (parsed.version) {
+              this.hoistedVersions.get(parsed.name)!.add(parsed.version);
+            }
+          } catch {
+            // Skip packages that can't be parsed
+          }
+        }
+      }
+    } catch (error) {
+      // If .modules.yaml doesn't exist or can't be read, just continue without hoist info
+      this.modulesYaml = undefined;
+      this.hoistedVersions = undefined;
+    }
   }
 
   /**
@@ -328,7 +369,12 @@ export class DuplicatesUsecase {
   async findDuplicates(
     options: DuplicatesOptions = {},
   ): Promise<DuplicateInstance[]> {
-    const { showAll = false, packageFilter, projectFilter } = options;
+    const { showAll = false, packageFilter, projectFilter, checkHoist, modulesDir } = options;
+
+    // Load hoist info if requested
+    if (checkHoist) {
+      this.loadHoistInfo(modulesDir);
+    }
 
     // Collect all package instances from trees (only actually resolved packages)
     const instancesMap = await this.collectInstancesFromTrees();
@@ -395,7 +441,7 @@ export class DuplicatesUsecase {
               }
             }
 
-            return {
+            const result: any = {
               id: instance.id,
               version: instance.version,
               dependencies: instance.dependencies,
@@ -403,6 +449,7 @@ export class DuplicatesUsecase {
               dependencyType: this.getDependencyType(packageName, allImporters),
               dependencyInfo,
             };
+            return result;
           }),
         );
 
@@ -422,10 +469,27 @@ export class DuplicatesUsecase {
           // Sort instances by ID for consistent output
           filteredInstances.sort((a, b) => a.id.localeCompare(b.id));
 
-          duplicates.push({
-            packageName,
-            instances: filteredInstances,
-          });
+          // Mark which versions are hoisted if hoist info is available
+          if (this.hoistedVersions && this.hoistedVersions.has(packageName)) {
+            const hoistedVersionsSet = this.hoistedVersions.get(packageName)!;
+            const hoistedVersionsArray = Array.from(hoistedVersionsSet).sort();
+
+            // Mark each instance as hoisted or not
+            for (const inst of filteredInstances) {
+              inst.hoisted = hoistedVersionsSet.has(inst.version);
+            }
+
+            duplicates.push({
+              packageName,
+              instances: filteredInstances,
+              hoistedVersions: hoistedVersionsArray,
+            });
+          } else {
+            duplicates.push({
+              packageName,
+              instances: filteredInstances,
+            });
+          }
         }
       }
     }
