@@ -369,11 +369,25 @@ export class DuplicatesUsecase {
   async findDuplicates(
     options: DuplicatesOptions = {},
   ): Promise<DuplicateInstance[]> {
-    const { showAll = false, packageFilter, projectFilter, checkHoist, modulesDir } = options;
+    let { showAll = false, packageFilter, projectFilter, checkHoist, modulesDir } = options;
 
     // Load hoist info if requested
     if (checkHoist) {
       this.loadHoistInfo(modulesDir);
+
+      // If no package filter specified, only look for packages with hoisted conflicts
+      if (!packageFilter && this.hoistedVersions) {
+        const hoistConflicts: string[] = [];
+        for (const [pkgName, versions] of this.hoistedVersions.entries()) {
+          if (versions.size > 1) {
+            hoistConflicts.push(pkgName);
+          }
+        }
+        // Use hoisted conflicts as package filter to avoid scanning everything
+        if (hoistConflicts.length > 0) {
+          packageFilter = hoistConflicts;
+        }
+      }
     }
 
     // Collect all package instances from trees (only actually resolved packages)
