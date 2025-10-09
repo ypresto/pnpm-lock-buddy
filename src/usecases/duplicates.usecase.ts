@@ -9,7 +9,7 @@ import {
 import { DependencyTracker } from "../core/dependency-tracker.js";
 import type { DependencyPathStep, DependencyInfo } from "../core/types.js";
 import type { PackageNode } from "@pnpm/reviewing.dependencies-hierarchy";
-import { loadModulesYaml, type ModulesYaml } from "../core/modules-yaml.js";
+import { loadModulesYaml, getHoistedVersions, type ModulesYaml, type HoistedVersionInfo } from "../core/modules-yaml.js";
 import path from "path";
 
 export interface DuplicatesOptions {
@@ -51,7 +51,7 @@ export class DuplicatesUsecase {
   private lockfile: PnpmLockfile;
   private lockfilePath: string;
   private modulesYaml?: ModulesYaml;
-  private hoistedVersions?: Map<string, Set<string>>; // packageName -> Set<version>
+  private hoistedVersions?: Map<string, HoistedVersionInfo[]>; // packageName -> hoisted version info
 
   constructor(
     lockfilePath: string,
@@ -72,23 +72,7 @@ export class DuplicatesUsecase {
       const modulesYamlPath = path.join(nodeModulesDir, ".modules.yaml");
 
       this.modulesYaml = loadModulesYaml(modulesYamlPath);
-      this.hoistedVersions = new Map();
-
-      if (this.modulesYaml.hoistedDependencies) {
-        for (const packageSpec of Object.keys(this.modulesYaml.hoistedDependencies)) {
-          try {
-            const parsed = parsePackageString(packageSpec);
-            if (!this.hoistedVersions.has(parsed.name)) {
-              this.hoistedVersions.set(parsed.name, new Set());
-            }
-            if (parsed.version) {
-              this.hoistedVersions.get(parsed.name)!.add(parsed.version);
-            }
-          } catch {
-            // Skip packages that can't be parsed
-          }
-        }
-      }
+      this.hoistedVersions = getHoistedVersions(this.modulesYaml);
     } catch (error) {
       // If .modules.yaml doesn't exist or can't be read, just continue without hoist info
       this.modulesYaml = undefined;
@@ -378,14 +362,29 @@ export class DuplicatesUsecase {
       // If no package filter specified, only look for packages with hoisted conflicts
       if (!packageFilter && this.hoistedVersions) {
         const hoistConflicts: string[] = [];
-        for (const [pkgName, versions] of this.hoistedVersions.entries()) {
-          if (versions.size > 1) {
-            hoistConflicts.push(pkgName);
+        for (const [pkgName, versionInfos] of this.hoistedVersions.entries()) {
+          // Group by hoisted name to check for actual conflicts
+          const byHoistedName = new Map<string, HoistedVersionInfo[]>();
+          for (const info of versionInfos) {
+            if (!byHoistedName.has(info.hoistedAs)) {
+              byHoistedName.set(info.hoistedAs, []);
+            }
+            byHoistedName.get(info.hoistedAs)!.push(info);
+          }
+          // Only consider it a conflict if multiple versions map to the same hoisted name
+          for (const versions of byHoistedName.values()) {
+            if (versions.length > 1) {
+              hoistConflicts.push(pkgName);
+              break;
+            }
           }
         }
         // Use hoisted conflicts as package filter to avoid scanning everything
         if (hoistConflicts.length > 0) {
           packageFilter = hoistConflicts;
+        } else {
+          // No actual hoisted conflicts, return empty
+          return [];
         }
       }
     }
@@ -481,7 +480,8 @@ export class DuplicatesUsecase {
         // Check if there's a hoist conflict even without lockfile duplicates
         let hasHoistConflict = false;
         if (checkHoist && this.hoistedVersions && this.hoistedVersions.has(packageName)) {
-          const hoistedVersionsSet = this.hoistedVersions.get(packageName)!;
+          const hoistedInfos = this.hoistedVersions.get(packageName)!;
+          const hoistedVersionsSet = new Set(hoistedInfos.map(info => info.version));
           // If any filtered instance version is different from hoisted versions, it's a conflict
           for (const inst of filteredInstances) {
             if (!hoistedVersionsSet.has(inst.version)) {
@@ -498,28 +498,34 @@ export class DuplicatesUsecase {
 
           // Mark which versions are hoisted if hoist info is available
           if (this.hoistedVersions && this.hoistedVersions.has(packageName)) {
-            const hoistedVersionsSet = this.hoistedVersions.get(packageName)!;
-            const hoistedVersionsArray = Array.from(hoistedVersionsSet).sort();
+            const hoistedInfos = this.hoistedVersions.get(packageName)!;
+            const hoistedVersionsMap = new Map(hoistedInfos.map(info => [info.version, info.hoistedAs]));
+            const hoistedVersionsArray = hoistedInfos.map(info =>
+              info.hoistedAs === packageName ? info.version : `${info.version} (as ${info.hoistedAs})`
+            ).sort();
 
             // Mark each instance as hoisted or not
             for (const inst of filteredInstances) {
-              inst.hoisted = hoistedVersionsSet.has(inst.version);
+              inst.hoisted = hoistedVersionsMap.has(inst.version);
             }
 
             // Add hoisted versions that aren't in filtered instances
             // This shows versions available at runtime but not used in lockfile
             if (projectFilter) {
-              for (const hoistedVersion of hoistedVersionsArray) {
+              for (const hoistedInfo of hoistedInfos) {
                 const alreadyExists = filteredInstances.some(
-                  inst => inst.version === hoistedVersion
+                  inst => inst.version === hoistedInfo.version
                 );
                 if (!alreadyExists) {
+                  const hoistedLabel = hoistedInfo.hoistedAs === packageName
+                    ? '(hoisted - available at runtime)'
+                    : `(hoisted as ${hoistedInfo.hoistedAs} - available at runtime)`;
                   // Add synthetic instance for hoisted version
                   filteredInstances.push({
-                    id: `${packageName}@${hoistedVersion}`,
-                    version: hoistedVersion,
+                    id: `${packageName}@${hoistedInfo.version}`,
+                    version: hoistedInfo.version,
                     dependencies: {},
-                    projects: ['(hoisted - available at runtime)'],
+                    projects: [hoistedLabel],
                     dependencyType: 'hoisted',
                     dependencyInfo: undefined,
                     hoisted: true,

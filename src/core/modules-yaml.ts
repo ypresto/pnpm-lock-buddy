@@ -23,7 +23,13 @@ export interface HoistConflict {
   versions: Array<{
     version: string;
     fullSpec: string;
+    hoistedAs: string;
   }>;
+}
+
+export interface HoistedVersionInfo {
+  version: string;
+  hoistedAs: string; // The name it's hoisted as (e.g., "strip-ansi" or "strip-ansi-cjs")
 }
 
 export function loadModulesYaml(modulesYamlPath: string): ModulesYaml {
@@ -38,6 +44,42 @@ export function loadModulesYaml(modulesYamlPath: string): ModulesYaml {
   }
 }
 
+export function getHoistedVersions(
+  modulesYaml: ModulesYaml,
+): Map<string, HoistedVersionInfo[]> {
+  const result = new Map<string, HoistedVersionInfo[]>();
+
+  if (!modulesYaml.hoistedDependencies) {
+    return result;
+  }
+
+  for (const [packageSpec, hoistInfo] of Object.entries(
+    modulesYaml.hoistedDependencies,
+  )) {
+    try {
+      const parsed = parsePackageString(packageSpec);
+      const packageName = parsed.name;
+      const version = parsed.version || "unknown";
+
+      // Get the hoisted name (the key in the hoistInfo object)
+      const hoistedAs = Object.keys(hoistInfo)[0] || packageName;
+
+      if (!result.has(packageName)) {
+        result.set(packageName, []);
+      }
+
+      result.get(packageName)!.push({
+        version,
+        hoistedAs,
+      });
+    } catch {
+      // Skip packages that can't be parsed
+    }
+  }
+
+  return result;
+}
+
 export function detectHoistConflicts(
   modulesYaml: ModulesYaml,
   packageFilter?: string[],
@@ -46,15 +88,16 @@ export function detectHoistConflicts(
     return [];
   }
 
-  // Group hoisted packages by base package name
-  const packageVersions = new Map<string, Set<string>>();
+  // Group hoisted packages by base package name and hoisted name
+  const packageVersions = new Map<string, Array<{spec: string, hoistedAs: string}>>();
 
-  for (const [packageSpec] of Object.entries(
+  for (const [packageSpec, hoistInfo] of Object.entries(
     modulesYaml.hoistedDependencies,
   )) {
     try {
       const parsed = parsePackageString(packageSpec);
       const packageName = parsed.name;
+      const hoistedAs = Object.keys(hoistInfo)[0] || packageName;
 
       // Apply package filter if specified
       if (packageFilter && packageFilter.length > 0) {
@@ -71,35 +114,48 @@ export function detectHoistConflicts(
       }
 
       if (!packageVersions.has(packageName)) {
-        packageVersions.set(packageName, new Set());
+        packageVersions.set(packageName, []);
       }
-      packageVersions.get(packageName)!.add(packageSpec);
+      packageVersions.get(packageName)!.push({spec: packageSpec, hoistedAs});
     } catch (error) {
       // Skip packages that can't be parsed
       continue;
     }
   }
 
-  // Find packages with multiple versions
+  // Find packages with multiple versions hoisted to the SAME name
   const conflicts: HoistConflict[] = [];
 
-  for (const [packageName, specs] of packageVersions.entries()) {
-    if (specs.size > 1) {
-      const versions = Array.from(specs).map((spec) => {
-        const parsed = parsePackageString(spec);
-        return {
-          version: parsed.version || "unknown",
-          fullSpec: spec,
-        };
-      });
+  for (const [packageName, entries] of packageVersions.entries()) {
+    // Group by hoisted name
+    const byHoistedName = new Map<string, Array<{spec: string, hoistedAs: string}>>();
+    for (const entry of entries) {
+      if (!byHoistedName.has(entry.hoistedAs)) {
+        byHoistedName.set(entry.hoistedAs, []);
+      }
+      byHoistedName.get(entry.hoistedAs)!.push(entry);
+    }
 
-      // Sort by version for consistent output
-      versions.sort((a, b) => a.version.localeCompare(b.version));
+    // Only flag as conflict if multiple versions map to the same hoisted name
+    for (const [hoistedAs, specs] of byHoistedName.entries()) {
+      if (specs.length > 1) {
+        const versions = specs.map((entry) => {
+          const parsed = parsePackageString(entry.spec);
+          return {
+            version: parsed.version || "unknown",
+            fullSpec: entry.spec,
+            hoistedAs,
+          };
+        });
 
-      conflicts.push({
-        packageName,
-        versions,
-      });
+        // Sort by version for consistent output
+        versions.sort((a, b) => a.version.localeCompare(b.version));
+
+        conflicts.push({
+          packageName,
+          versions,
+        });
+      }
     }
   }
 
