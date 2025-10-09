@@ -478,8 +478,21 @@ export class DuplicatesUsecase {
           ? filteredInstances.length > 1
           : instanceIds.length > 1;
 
-        // Only include if we have actual instances after filtering (and they are duplicates or showAll)
-        if (filteredInstances.length > 0 && (isDuplicate || showAll)) {
+        // Check if there's a hoist conflict even without lockfile duplicates
+        let hasHoistConflict = false;
+        if (checkHoist && this.hoistedVersions && this.hoistedVersions.has(packageName)) {
+          const hoistedVersionsSet = this.hoistedVersions.get(packageName)!;
+          // If any filtered instance version is different from hoisted versions, it's a conflict
+          for (const inst of filteredInstances) {
+            if (!hoistedVersionsSet.has(inst.version)) {
+              hasHoistConflict = true;
+              break;
+            }
+          }
+        }
+
+        // Only include if we have actual instances after filtering (and they are duplicates or showAll or hoist conflict)
+        if (filteredInstances.length > 0 && (isDuplicate || showAll || hasHoistConflict)) {
           // Sort instances by ID for consistent output
           filteredInstances.sort((a, b) => a.id.localeCompare(b.id));
 
@@ -491,6 +504,30 @@ export class DuplicatesUsecase {
             // Mark each instance as hoisted or not
             for (const inst of filteredInstances) {
               inst.hoisted = hoistedVersionsSet.has(inst.version);
+            }
+
+            // Add hoisted versions that aren't in filtered instances
+            // This shows versions available at runtime but not used in lockfile
+            if (projectFilter) {
+              for (const hoistedVersion of hoistedVersionsArray) {
+                const alreadyExists = filteredInstances.some(
+                  inst => inst.version === hoistedVersion
+                );
+                if (!alreadyExists) {
+                  // Add synthetic instance for hoisted version
+                  filteredInstances.push({
+                    id: `${packageName}@${hoistedVersion}`,
+                    version: hoistedVersion,
+                    dependencies: {},
+                    projects: ['(hoisted - available at runtime)'],
+                    dependencyType: 'hoisted',
+                    dependencyInfo: undefined,
+                    hoisted: true,
+                  });
+                }
+              }
+              // Re-sort after adding hoisted versions
+              filteredInstances.sort((a, b) => a.id.localeCompare(b.id));
             }
 
             duplicates.push({
