@@ -373,12 +373,12 @@ export function formatDuplicates(
         const versionKey = `${dup.packageName}@${canonicalVersion}`;
         const versionNum = versionMap.get(versionKey);
 
-        // Mark hoisted versions
-        const hoistedMark = instance.hoisted
-          ? (useColor ? chalk.magenta(" [HOISTED]") : " [HOISTED]")
+        // Mark hoisted versions with prefix
+        const hoistedPrefix = instance.hoisted
+          ? (useColor ? chalk.magenta("--(hoisted)-- ") : "--(hoisted)-- ")
           : "";
 
-        const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}${hoistedMark}`;
+        const displayVersion = `${hoistedPrefix}${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
 
         lines.push(`  ${displayVersion}${typeInfo}`);
 
@@ -528,11 +528,11 @@ export function formatPerProjectDuplicates(
             const versionKey = `${packageName}@${canonicalVersion}`;
             const versionNum = versionMap.get(versionKey);
 
-            const hoistedMark = instance.hoisted
-              ? (useColor ? chalk.magenta(" [HOISTED]") : " [HOISTED]")
+            const hoistedPrefix = instance.hoisted
+              ? (useColor ? chalk.magenta("--(hoisted)-- ") : "--(hoisted)-- ")
               : "";
 
-            const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}${hoistedMark}`;
+            const displayVersion = `${hoistedPrefix}${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
 
             // Use tree formatting even for simple instances
             const treePrefix = isLast ? "    └───" : "    ├───";
@@ -547,11 +547,11 @@ export function formatPerProjectDuplicates(
           const versionKey = `${packageName}@${canonicalVersion}`;
           const versionNum = versionMap.get(versionKey);
 
-          const hoistedMark = instance.hoisted
-            ? (useColor ? chalk.magenta(" [HOISTED]") : " [HOISTED]")
+          const hoistedPrefix = instance.hoisted
+            ? (useColor ? chalk.magenta("--(hoisted)-- ") : "--(hoisted)-- ")
             : "";
 
-          const displayVersion = `${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}${hoistedMark}`;
+          const displayVersion = `${hoistedPrefix}${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
 
           // Always use tree formatting in per-project mode
           const treePrefix = isLast ? "    └───" : "    ├───";

@@ -654,7 +654,16 @@ export class DuplicatesUsecase {
 
         const isDuplicate = uniqueVersions.size > 1; // Multiple versions = duplicate
 
-        if (isDuplicate || options.showAll) {
+        // Check if there's a hoisted version mismatch for this project
+        let hasHoistedMismatch = false;
+        if (options.checkHoist && this.hoistedVersions?.has(packageName)) {
+          const hoistedInfos = this.hoistedVersions.get(packageName)!;
+          const hoistedVersionsSet = new Set(hoistedInfos.map(info => info.version));
+          // Check if any instance is not hoisted (version mismatch)
+          hasHoistedMismatch = allInstances.some(inst => !hoistedVersionsSet.has(inst.version));
+        }
+
+        if (isDuplicate || options.showAll || hasHoistedMismatch) {
           const enrichedInstances = await Promise.all(
             allInstances.map(async (inst) => ({
               id: inst.id,
@@ -674,6 +683,38 @@ export class DuplicatesUsecase {
           // Get hoistedVersions from the original enrichedDuplicates
           const originalDup = enrichedDuplicates.find(d => d.packageName === packageName);
           const hoistedVersions = originalDup?.hoistedVersions;
+
+          // Add synthetic hoisted instances if they differ from project's versions
+          if (options.checkHoist && hoistedVersions) {
+            for (const inst of allInstances) {
+              const hoistedVersionsSet = new Set(
+                this.hoistedVersions?.get(packageName)?.map(info => info.version) || []
+              );
+              // Check if this instance's version is not hoisted
+              if (!inst.hoisted && hoistedVersionsSet.size > 0) {
+                // Add synthetic instances for all hoisted versions
+                const hoistedInfos = this.hoistedVersions?.get(packageName) || [];
+                for (const hoistedInfo of hoistedInfos) {
+                  const alreadyExists = enrichedInstances.some(
+                    ei => ei.version === hoistedInfo.version
+                  );
+                  if (!alreadyExists) {
+                    enrichedInstances.push({
+                      id: `${packageName}@${hoistedInfo.version}`,
+                      version: hoistedInfo.version,
+                      dependencies: {},
+                      dependencyInfo: {
+                        typeSummary: 'hoisted',
+                        path: [{package: `${packageName}@${hoistedInfo.version}`, type: 'hoisted', specifier: 'hoisted'}],
+                      },
+                      hoisted: true,
+                    });
+                  }
+                }
+                break; // Only need to add once
+              }
+            }
+          }
 
           duplicatePackages.push({
             packageName,
@@ -710,7 +751,11 @@ export class DuplicatesUsecase {
             }),
           );
 
-          return uniqueVersionsAfterOmit.size > 1 || options.showAll;
+          // With --hoist, also show if there's a hoisted version mismatch
+          const hasHoistedMismatch = options.checkHoist && pkg.hoistedVersions &&
+            pkg.instances.some((inst: any) => !inst.hoisted);
+
+          return uniqueVersionsAfterOmit.size > 1 || options.showAll || hasHoistedMismatch;
         });
 
       if (filteredDuplicatePackages.length > 0) {
