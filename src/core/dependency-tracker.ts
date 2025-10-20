@@ -285,24 +285,34 @@ export class DependencyTracker {
     visited.add(packageId);
 
     const snapshotData = lockfile.snapshots?.[packageId];
-    if (!snapshotData?.dependencies) return undefined;
+    if (!snapshotData) return undefined;
 
     const childNodes: PackageNode[] = [];
 
+    // Process all types of dependencies from snapshot (dependencies and optionalDependencies)
+    const allSnapshotDeps = {
+      ...snapshotData.dependencies,
+      ...snapshotData.optionalDependencies,
+    };
+
     for (const [childName, childVersion] of Object.entries(
-      snapshotData.dependencies,
+      allSnapshotDeps || {},
     )) {
+      // Ensure version is a string
+      const versionStr =
+        typeof childVersion === "string" ? childVersion : String(childVersion);
+
       const childNode: PackageNode = {
         alias: childName,
         name: childName,
-        version: childVersion,
+        version: versionStr,
         path: `node_modules/${childName}`,
         isPeer: false,
         isSkipped: false,
         isMissing: false,
         dependencies: this.buildTransitiveDepsFromLockfile(
           childName,
-          childVersion,
+          versionStr,
           lockfile,
           visited,
           visitedImporters,
