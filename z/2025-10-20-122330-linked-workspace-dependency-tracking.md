@@ -169,3 +169,44 @@ Full test suite: **83 tests passed, 9 skipped, 0 failed**
 
 - `src/core/dependency-tracker.ts` - All 6 fixes above
 - `test/unit/core/dependency-tracker.test.ts` - 4 reproduction tests
+
+---
+
+## Per-Project Fix (2025-10-20 17:36)
+
+### Fix 7: Per-Project Duplicate Detection
+
+**Problem**: `--per-project` flag wasn't detecting duplicates when the same project used different versions through different file variants.
+
+**Example**:
+- `apps/attendance-webapp` uses react@18.2.0 through `bakuraku-fetch@file:...(react@18.2.0)`
+- `apps/attendance-webapp` uses react@19.1.1 directly
+- File variant detection grouped them separately:
+  - react@18 → projectKey: `@layerone/bakuraku-fetch@file:...`
+  - react@19 → projectKey: `apps/attendance-webapp`
+- Result: Not detected as duplicate within same project
+
+**Solution**: In `findPerProjectDuplicates()`, always use the actual project name as the grouping key instead of calling `detectFileVariantProjectKey()`. File variant detection splits instances that should be grouped together.
+
+**Before**:
+```
+$ duplicates --per-project react
+No per-project duplicate packages found.
+```
+
+**After**:
+```
+$ duplicates --per-project react
+Found duplicates in 1 project(s):
+
+react:
+  apps/attendance-webapp: has 2 instances
+    ├─── react@18.2.0 [1]
+    └─── react@19.1.1 [2]
+```
+
+### All Files Modified (Complete)
+
+- `src/core/dependency-tracker.ts` - Fixes 1-6 (link tracking, enrichment, warnings)
+- `src/usecases/duplicates.usecase.ts` - Fix 7 (per-project grouping)
+- `test/unit/core/dependency-tracker.test.ts` - 4 reproduction tests
