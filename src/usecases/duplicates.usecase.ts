@@ -9,7 +9,12 @@ import {
 import { DependencyTracker } from "../core/dependency-tracker.js";
 import type { DependencyPathStep, DependencyInfo } from "../core/types.js";
 import type { PackageNode } from "@pnpm/reviewing.dependencies-hierarchy";
-import { loadModulesYaml, getHoistedVersions, type ModulesYaml, type HoistedVersionInfo } from "../core/modules-yaml.js";
+import {
+  loadModulesYaml,
+  getHoistedVersions,
+  type ModulesYaml,
+  type HoistedVersionInfo,
+} from "../core/modules-yaml.js";
 import path from "path";
 
 export interface DuplicatesOptions {
@@ -68,7 +73,8 @@ export class DuplicatesUsecase {
 
     try {
       const lockfileDir = path.dirname(this.lockfilePath);
-      const nodeModulesDir = modulesDir || path.join(lockfileDir, "node_modules");
+      const nodeModulesDir =
+        modulesDir || path.join(lockfileDir, "node_modules");
       const modulesYamlPath = path.join(nodeModulesDir, ".modules.yaml");
 
       this.modulesYaml = loadModulesYaml(modulesYamlPath);
@@ -147,7 +153,9 @@ export class DuplicatesUsecase {
 
   /**
    * Detect file variant project key using multiple methods
+   * NOTE: Currently unused but kept for potential future use
    */
+  // @ts-expect-error - unused but kept for reference
   private detectFileVariantProjectKey(
     instance: any,
     project: string,
@@ -353,7 +361,13 @@ export class DuplicatesUsecase {
   async findDuplicates(
     options: DuplicatesOptions = {},
   ): Promise<DuplicateInstance[]> {
-    let { showAll = false, packageFilter, projectFilter, checkHoist, modulesDir } = options;
+    let {
+      showAll = false,
+      packageFilter,
+      projectFilter,
+      checkHoist,
+      modulesDir,
+    } = options;
 
     // Load hoist info if requested
     if (checkHoist) {
@@ -458,7 +472,9 @@ export class DuplicatesUsecase {
               id: instance.id,
               version: instance.version,
               dependencies: instance.dependencies,
-              projects: projectFilter ? allImporters : Array.from(instance.projects),
+              projects: projectFilter
+                ? allImporters
+                : Array.from(instance.projects),
               dependencyType: this.getDependencyType(packageName, allImporters),
               dependencyInfo,
             };
@@ -479,9 +495,15 @@ export class DuplicatesUsecase {
 
         // Check if there's a hoist conflict even without lockfile duplicates
         let hasHoistConflict = false;
-        if (checkHoist && this.hoistedVersions && this.hoistedVersions.has(packageName)) {
+        if (
+          checkHoist &&
+          this.hoistedVersions &&
+          this.hoistedVersions.has(packageName)
+        ) {
           const hoistedInfos = this.hoistedVersions.get(packageName)!;
-          const hoistedVersionsSet = new Set(hoistedInfos.map(info => info.version));
+          const hoistedVersionsSet = new Set(
+            hoistedInfos.map((info) => info.version),
+          );
           // If any filtered instance version is different from hoisted versions, it's a conflict
           for (const inst of filteredInstances) {
             if (!hoistedVersionsSet.has(inst.version)) {
@@ -492,17 +514,26 @@ export class DuplicatesUsecase {
         }
 
         // Only include if we have actual instances after filtering (and they are duplicates or showAll or hoist conflict)
-        if (filteredInstances.length > 0 && (isDuplicate || showAll || hasHoistConflict)) {
+        if (
+          filteredInstances.length > 0 &&
+          (isDuplicate || showAll || hasHoistConflict)
+        ) {
           // Sort instances by ID for consistent output
           filteredInstances.sort((a, b) => a.id.localeCompare(b.id));
 
           // Mark which versions are hoisted if hoist info is available
           if (this.hoistedVersions && this.hoistedVersions.has(packageName)) {
             const hoistedInfos = this.hoistedVersions.get(packageName)!;
-            const hoistedVersionsMap = new Map(hoistedInfos.map(info => [info.version, info.hoistedAs]));
-            const hoistedVersionsArray = hoistedInfos.map(info =>
-              info.hoistedAs === packageName ? info.version : `${info.version} (as ${info.hoistedAs})`
-            ).sort();
+            const hoistedVersionsMap = new Map(
+              hoistedInfos.map((info) => [info.version, info.hoistedAs]),
+            );
+            const hoistedVersionsArray = hoistedInfos
+              .map((info) =>
+                info.hoistedAs === packageName
+                  ? info.version
+                  : `${info.version} (as ${info.hoistedAs})`,
+              )
+              .sort();
 
             // Mark each instance as hoisted or not
             for (const inst of filteredInstances) {
@@ -514,19 +545,20 @@ export class DuplicatesUsecase {
             if (projectFilter) {
               for (const hoistedInfo of hoistedInfos) {
                 const alreadyExists = filteredInstances.some(
-                  inst => inst.version === hoistedInfo.version
+                  (inst) => inst.version === hoistedInfo.version,
                 );
                 if (!alreadyExists) {
-                  const hoistedLabel = hoistedInfo.hoistedAs === packageName
-                    ? '(hoisted - available at runtime)'
-                    : `(hoisted as ${hoistedInfo.hoistedAs} - available at runtime)`;
+                  const hoistedLabel =
+                    hoistedInfo.hoistedAs === packageName
+                      ? "(hoisted - available at runtime)"
+                      : `(hoisted as ${hoistedInfo.hoistedAs} - available at runtime)`;
                   // Add synthetic instance for hoisted version
                   filteredInstances.push({
                     id: `${packageName}@${hoistedInfo.version}`,
                     version: hoistedInfo.version,
                     dependencies: {},
                     projects: [hoistedLabel],
-                    dependencyType: 'hoisted',
+                    dependencyType: "hoisted",
                     dependencyInfo: undefined,
                     hoisted: true,
                   });
@@ -569,9 +601,8 @@ export class DuplicatesUsecase {
     const globalDuplicates = await this.findDuplicates(options);
 
     // Phase 1: Ensure all instances have complete dependency info
-    const enrichedDuplicates = await this.enrichInstancesWithDependencyInfo(
-      globalDuplicates,
-    );
+    const enrichedDuplicates =
+      await this.enrichInstancesWithDependencyInfo(globalDuplicates);
 
     // Phase 2: Group by importer with robust file variant detection
     const importerGroups = new Map<string, DuplicateInstance[]>();
@@ -585,12 +616,9 @@ export class DuplicatesUsecase {
             continue;
           }
 
-          // Use robust multi-method file variant detection
-          const projectKey = this.detectFileVariantProjectKey(
-            instance,
-            project,
-            duplicate.packageName,
-          );
+          // For per-project mode, always use the actual project as the key
+          // File variant detection can split instances from the same project into different groups
+          const projectKey = project;
 
           if (!importerGroups.has(projectKey)) {
             importerGroups.set(projectKey, []);
@@ -658,9 +686,13 @@ export class DuplicatesUsecase {
         let hasHoistedMismatch = false;
         if (options.checkHoist && this.hoistedVersions?.has(packageName)) {
           const hoistedInfos = this.hoistedVersions.get(packageName)!;
-          const hoistedVersionsSet = new Set(hoistedInfos.map(info => info.version));
+          const hoistedVersionsSet = new Set(
+            hoistedInfos.map((info) => info.version),
+          );
           // Check if any instance is not hoisted (version mismatch)
-          hasHoistedMismatch = allInstances.some(inst => !hoistedVersionsSet.has(inst.version));
+          hasHoistedMismatch = allInstances.some(
+            (inst) => !hoistedVersionsSet.has(inst.version),
+          );
         }
 
         if (isDuplicate || options.showAll || hasHoistedMismatch) {
@@ -681,22 +713,27 @@ export class DuplicatesUsecase {
           );
 
           // Get hoistedVersions from the original enrichedDuplicates
-          const originalDup = enrichedDuplicates.find(d => d.packageName === packageName);
+          const originalDup = enrichedDuplicates.find(
+            (d) => d.packageName === packageName,
+          );
           const hoistedVersions = originalDup?.hoistedVersions;
 
           // Add synthetic hoisted instances if they differ from project's versions
           if (options.checkHoist && hoistedVersions) {
             for (const inst of allInstances) {
               const hoistedVersionsSet = new Set(
-                this.hoistedVersions?.get(packageName)?.map(info => info.version) || []
+                this.hoistedVersions
+                  ?.get(packageName)
+                  ?.map((info) => info.version) || [],
               );
               // Check if this instance's version is not hoisted
               if (!inst.hoisted && hoistedVersionsSet.size > 0) {
                 // Add synthetic instances for all hoisted versions
-                const hoistedInfos = this.hoistedVersions?.get(packageName) || [];
+                const hoistedInfos =
+                  this.hoistedVersions?.get(packageName) || [];
                 for (const hoistedInfo of hoistedInfos) {
                   const alreadyExists = enrichedInstances.some(
-                    ei => ei.version === hoistedInfo.version
+                    (ei) => ei.version === hoistedInfo.version,
                   );
                   if (!alreadyExists) {
                     enrichedInstances.push({
@@ -704,8 +741,14 @@ export class DuplicatesUsecase {
                       version: hoistedInfo.version,
                       dependencies: {},
                       dependencyInfo: {
-                        typeSummary: 'hoisted',
-                        path: [{package: `${packageName}@${hoistedInfo.version}`, type: 'hoisted', specifier: 'hoisted'}],
+                        typeSummary: "hoisted",
+                        path: [
+                          {
+                            package: `${packageName}@${hoistedInfo.version}`,
+                            type: "hoisted",
+                            specifier: "hoisted",
+                          },
+                        ],
                       },
                       hoisted: true,
                     });
@@ -752,10 +795,16 @@ export class DuplicatesUsecase {
           );
 
           // With --hoist, also show if there's a hoisted version mismatch
-          const hasHoistedMismatch = options.checkHoist && pkg.hoistedVersions &&
+          const hasHoistedMismatch =
+            options.checkHoist &&
+            pkg.hoistedVersions &&
             pkg.instances.some((inst: any) => !inst.hoisted);
 
-          return uniqueVersionsAfterOmit.size > 1 || options.showAll || hasHoistedMismatch;
+          return (
+            uniqueVersionsAfterOmit.size > 1 ||
+            options.showAll ||
+            hasHoistedMismatch
+          );
         });
 
       if (filteredDuplicatePackages.length > 0) {
