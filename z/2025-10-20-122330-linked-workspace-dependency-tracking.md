@@ -120,3 +120,52 @@ This fix ensures that workspace monorepos correctly track dependencies through:
 - Version conflicts in deeply nested workspace structures
 
 The `duplicates` command will now correctly identify version conflicts even when they occur through multiple levels of workspace dependencies.
+
+---
+
+## Additional Fixes (2025-10-20 16:27)
+
+### Fix 4: Absolute Link Path Resolution
+
+**Problem**: Links without `../` or `./` prefix (e.g., `link:packages/webapp/bakuraku-fetch`) were incorrectly treated as relative paths and appended to the source path.
+
+**Solution**: Modified `resolveLinkPath()` to treat paths without `../` or `./` as absolute from workspace root.
+
+### Fix 5: Include optionalDependencies in Transitive Resolution
+
+**Problem**: `buildTransitiveDepsFromLockfile()` only processed `dependencies` from snapshots, missing peer dependencies stored in `optionalDependencies`.
+
+**Solution**: Include both `dependencies` and `optionalDependencies` when building transitive dependency trees from snapshots.
+
+### Fix 6: Enrich pnpm-generated Trees with Linked Dependencies
+
+**Problem**: Real lockfiles use pnpm's `buildDependenciesHierarchy` which doesn't fully resolve `link:` dependencies from workspace package snapshots, causing missing transitive dependencies in the tree output.
+
+**Solution**:
+- Added `enrichTreesWithLinkedWorkspaceDeps()` to post-process pnpm-generated trees
+- Added `enrichNodesWithLinkedDeps()` to recursively find and enrich `link:` dependencies
+- For each `file:` workspace package, check its snapshot for `link:` dependencies
+- Resolve links to standalone importers to detect runtime version conflicts
+- Add warnings for missing snapshots and unresolvable links
+
+**Real-world validation** (layerone-webapps-5):
+```
+├─(link:)─ @layerone/bakuraku-fetch@link:../../packages/webapp/bakuraku-fetch
+│  └─── react@19.1.1 [2]
+```
+
+Now correctly shows bakuraku-fetch with react@19.1.1 under foundation-react(react@18.2.0), revealing the runtime version conflict!
+
+### Warnings Added
+
+1. `Warning: Missing snapshot for workspace package <name>` - when a `file:` package has no snapshot
+2. `Warning: Cannot resolve link <name>=<path> from <source>` - when a link cannot be resolved
+
+### Final Test Results
+
+Full test suite: **83 tests passed, 9 skipped, 0 failed**
+
+### All Files Modified
+
+- `src/core/dependency-tracker.ts` - All 6 fixes above
+- `test/unit/core/dependency-tracker.test.ts` - 4 reproduction tests

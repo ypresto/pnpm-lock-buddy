@@ -43,6 +43,7 @@ export class DependencyTracker {
    * Examples:
    * - link:../packages/logger from apps/web → packages/logger
    * - link:./packages/utils from . → packages/utils
+   * - link:packages/webapp/bakuraku-fetch from anywhere → packages/webapp/bakuraku-fetch (absolute)
    */
   private resolveLinkPath(
     sourceImporter: string,
@@ -60,6 +61,11 @@ export class DependencyTracker {
       } else {
         return relativePath;
       }
+    }
+
+    // If path doesn't start with ../ or ./, it's an absolute path from workspace root
+    if (!relativePath.startsWith("../") && !relativePath.startsWith("./")) {
+      return relativePath;
     }
 
     // Resolve relative path from source importer
@@ -131,10 +137,129 @@ export class DependencyTracker {
       );
       if (totalNodes === 0) {
         this.buildTreesFromLockfile();
+      } else {
+        // Post-process pnpm trees to add missing linked workspace dependencies
+        this.enrichTreesWithLinkedWorkspaceDeps();
       }
     } catch (error) {
       // Fallback for tests without node_modules
       this.buildTreesFromLockfile();
+    }
+  }
+
+  /**
+   * Post-process trees built by pnpm to add dependencies from linked workspace packages
+   * that may not be fully tracked in the filesystem-based tree
+   */
+  private enrichTreesWithLinkedWorkspaceDeps(): void {
+    const lockfile = this.getLockfile();
+
+    for (const nodes of Object.values(this.dependencyTrees)) {
+      this.enrichNodesWithLinkedDeps(nodes, lockfile);
+    }
+  }
+
+  /**
+   * Recursively enrich nodes with dependencies from linked workspace packages
+   */
+  private enrichNodesWithLinkedDeps(
+    nodes: PackageNode[],
+    lockfile: PnpmLockfile,
+  ): void {
+    for (const node of nodes) {
+      // Check if this is a workspace package (file: version)
+      if (node.version.startsWith("file:")) {
+        const snapshotKey = `${node.name}@${node.version}`;
+        const snapshot = lockfile.snapshots?.[snapshotKey];
+
+        if (!snapshot) {
+          console.warn(
+            `Warning: Missing snapshot for workspace package ${snapshotKey}`,
+          );
+        }
+
+        if (snapshot) {
+          // Check for link: dependencies in the snapshot
+          const allSnapshotDeps = {
+            ...snapshot.dependencies,
+            ...snapshot.optionalDependencies,
+          };
+
+          for (const [depName, depVersion] of Object.entries(
+            allSnapshotDeps || {},
+          )) {
+            if (
+              typeof depVersion === "string" &&
+              depVersion.startsWith("link:")
+            ) {
+              // Check if this link is already in the node's dependencies
+              const existingChild = node.dependencies?.find(
+                (child) => child.name === depName,
+              );
+
+              // Enrich the link if it's missing OR if it exists but has no dependencies
+              if (!existingChild || !existingChild.dependencies) {
+                // Link is missing or incomplete - try to resolve it
+                const sourceImporter = this.extractImporterPathFromFileVersion(
+                  node.version,
+                );
+                const resolvedImporter = sourceImporter
+                  ? this.resolveLinkPath(sourceImporter, depVersion)
+                  : null;
+
+                if (
+                  resolvedImporter &&
+                  lockfile.importers?.[resolvedImporter]
+                ) {
+                  // Always use standalone importer for links to detect runtime conflicts
+                  // Even if a contextualized snapshot exists, the filesystem link resolves
+                  // to the standalone workspace directory
+                  const linkDeps = this.buildLinkedDependencyNodes(
+                    resolvedImporter,
+                    lockfile,
+                    new Set(),
+                  );
+
+                  if (existingChild) {
+                    // Enrich existing node
+                    existingChild.dependencies =
+                      linkDeps.length > 0 ? linkDeps : undefined;
+                  } else {
+                    // Create new link node
+                    const linkNode: PackageNode = {
+                      alias: depName,
+                      name: depName,
+                      version: depVersion,
+                      path: `node_modules/${depName}`,
+                      isPeer: false,
+                      isSkipped: false,
+                      isMissing: false,
+                      dependencies: linkDeps.length > 0 ? linkDeps : undefined,
+                    };
+
+                    if (!node.dependencies) {
+                      node.dependencies = [];
+                    }
+                    node.dependencies.push(linkNode);
+                  }
+                } else if (
+                  !resolvedImporter ||
+                  !lockfile.importers?.[resolvedImporter]
+                ) {
+                  console.warn(
+                    `Warning: Cannot resolve link ${depName}=${depVersion} from ${sourceImporter}`,
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Recursively process children
+      if (node.dependencies) {
+        this.enrichNodesWithLinkedDeps(node.dependencies, lockfile);
+      }
     }
   }
 
@@ -301,6 +426,42 @@ export class DependencyTracker {
       // Ensure version is a string
       const versionStr =
         typeof childVersion === "string" ? childVersion : String(childVersion);
+
+      // Handle link: dependencies in snapshots - create a node for the linked package
+      if (versionStr.startsWith("link:")) {
+        const sourceImporter =
+          this.extractImporterPathFromFileVersion(packageVersion) || ".";
+        const resolvedImporter = this.resolveLinkPath(
+          sourceImporter,
+          versionStr,
+        );
+
+        if (resolvedImporter && lockfile.importers?.[resolvedImporter]) {
+          // Use standalone importer to track dependencies from linked workspace package
+          const linkedDeps =
+            !visitedImporters || !visitedImporters.has(resolvedImporter)
+              ? this.buildLinkedDependencyNodes(
+                  resolvedImporter,
+                  lockfile,
+                  visitedImporters || new Set(),
+                )
+              : [];
+
+          const linkNode: PackageNode = {
+            alias: childName,
+            name: childName,
+            version: versionStr,
+            path: `node_modules/${childName}`,
+            isPeer: false,
+            isSkipped: false,
+            isMissing: false,
+            dependencies: linkedDeps.length > 0 ? linkedDeps : undefined,
+          };
+
+          childNodes.push(linkNode);
+        }
+        continue;
+      }
 
       const childNode: PackageNode = {
         alias: childName,

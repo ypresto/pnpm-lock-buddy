@@ -990,30 +990,21 @@ describe("DependencyTracker", () => {
         importers: {
           "apps/attendance-webapp": {
             dependencies: {
-              "@my/ui-react": {
+              "@my/foundation-react": {
                 specifier: "workspace:*",
-                version:
-                  "file:packages/webapp/ui-react(@floating-ui/react@0.26.4)(react-dom@18.2.0)(react@18.2.0)",
+                version: "file:packages/webapp/foundation-react(react@18.2.0)",
               },
               react: {
                 specifier: "18.2.0",
                 version: "18.2.0",
               },
-              "react-dom": {
-                specifier: "18.2.0",
-                version: "18.2.0(react@18.2.0)",
-              },
             },
           },
-          "packages/webapp/ui-react": {
+          "packages/webapp/foundation-react": {
             dependencies: {
               "@my/fetch-utils": {
                 specifier: "workspace:*",
                 version: "link:../fetch-utils",
-              },
-              react: {
-                specifier: "18.2.0",
-                version: "18.2.0",
               },
             },
           },
@@ -1027,12 +1018,12 @@ describe("DependencyTracker", () => {
           },
         },
         packages: {
-          "@my/ui-react@file:packages/webapp/ui-react": {
+          "@my/foundation-react@file:packages/webapp/foundation-react": {
             resolution: {
-              directory: "packages/webapp/ui-react",
+              directory: "packages/webapp/foundation-react",
               type: "directory",
             },
-            name: "@my/ui-react",
+            name: "@my/foundation-react",
             version: "0.0.0",
           },
           "react@18.2.0": {
@@ -1041,41 +1032,71 @@ describe("DependencyTracker", () => {
           "react@19.1.1": {
             resolution: { integrity: "sha512-react19" },
           },
-          "react-dom@18.2.0": {
-            resolution: { integrity: "sha512-reactdom18" },
-            peerDependencies: { react: "^18.2.0" },
-          },
         },
         snapshots: {
-          "@my/ui-react@file:packages/webapp/ui-react(@floating-ui/react@0.26.4)(react-dom@18.2.0)(react@18.2.0)":
+          "@my/foundation-react@file:packages/webapp/foundation-react(react@18.2.0)":
             {
               dependencies: {
+                "@my/fetch-utils": "link:../fetch-utils",
+              },
+              optionalDependencies: {
                 react: "18.2.0",
-                "react-dom": "18.2.0(react@18.2.0)",
               },
             },
+          // No peer-contextualized snapshot for fetch-utils
+          // So it will use the standalone importer which has react@19.1.1
           "react@18.2.0": {},
           "react@19.1.1": {},
-          "react-dom@18.2.0(react@18.2.0)": {
-            dependencies: {
-              react: "18.2.0",
-            },
-          },
         },
       };
 
       const lockfilePath = writeMockLockfile(injectedLinkLockfile);
       const tracker = new DependencyTracker(lockfilePath);
 
-      // attendance-webapp uses ui-react as an injected workspace dependency
-      // ui-react links to fetch-utils which has react v19
-      // All three should be tracked as using react v19
+      // attendance-webapp uses foundation-react as an injected workspace dependency
+      // The injected snapshot has:
+      // 1. link to fetch-utils which has react v19
+      // 2. optionalDependencies with react v18
+      // So attendance-webapp should have BOTH react versions
+      const react18Importers =
+        await tracker.getImportersForPackage("react@18.2.0");
       const react19Importers =
         await tracker.getImportersForPackage("react@19.1.1");
 
+      expect(react18Importers).toContain("apps/attendance-webapp");
       expect(react19Importers).toContain("packages/webapp/fetch-utils");
-      expect(react19Importers).toContain("packages/webapp/ui-react");
       expect(react19Importers).toContain("apps/attendance-webapp");
+
+      // Verify dependency tree structure
+      const trees = await tracker.getDependencyTrees();
+      const attendanceTree = trees["apps/attendance-webapp"];
+      expect(attendanceTree).toBeDefined();
+
+      // Find the foundation-react node
+      const foundationReactNode = attendanceTree?.find(
+        (node) => node.name === "@my/foundation-react",
+      );
+      expect(foundationReactNode).toBeDefined();
+      expect(foundationReactNode?.dependencies).toBeDefined();
+
+      // foundation-react should have fetch-utils as a link dependency
+      const fetchUtilsNode = foundationReactNode?.dependencies?.find(
+        (node) => node.name === "@my/fetch-utils",
+      );
+      expect(fetchUtilsNode).toBeDefined();
+      expect(fetchUtilsNode?.version).toBe("link:../fetch-utils");
+
+      // fetch-utils should have react@19.1.1 as a dependency
+      const react19Node = fetchUtilsNode?.dependencies?.find(
+        (node) => node.name === "react" && node.version === "19.1.1",
+      );
+      expect(react19Node).toBeDefined();
+
+      // foundation-react should also have react@18.2.0 from optionalDependencies
+      const react18InFoundation = foundationReactNode?.dependencies?.find(
+        (node) => node.name === "react" && node.version === "18.2.0",
+      );
+      expect(react18InFoundation).toBeDefined();
     });
   });
 });
