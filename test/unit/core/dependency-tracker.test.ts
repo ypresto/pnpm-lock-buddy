@@ -788,4 +788,294 @@ describe("DependencyTracker", () => {
       });
     });
   });
+
+  describe("non-injected workspace dependencies with version conflicts", () => {
+    /**
+     * Reproduction test for issue where:
+     * - foundation-react has react v18 (injected)
+     * - foundation-react depends on fetch-utils (workspace link, NOT injected)
+     * - fetch-utils depends on react v19
+     * - Runtime issue: react v19 from fetch-utils conflicts with react v18
+     */
+    it("should track transitive dependencies through non-injected workspace links", async () => {
+      const nonInjectedLinkLockfile: PnpmLockfile = {
+        lockfileVersion: "9.0",
+        importers: {
+          "packages/webapp/foundation-react": {
+            dependencies: {
+              "@my/fetch-utils": {
+                specifier: "workspace:*",
+                version: "link:../fetch-utils",
+              },
+              react: {
+                specifier: "18.2.0",
+                version: "18.2.0",
+              },
+            },
+          },
+          "packages/webapp/fetch-utils": {
+            dependencies: {
+              react: {
+                specifier: "19.1.1",
+                version: "19.1.1",
+              },
+            },
+          },
+        },
+        packages: {
+          "react@18.2.0": {
+            resolution: { integrity: "sha512-react18" },
+          },
+          "react@19.1.1": {
+            resolution: { integrity: "sha512-react19" },
+          },
+        },
+        snapshots: {
+          "react@18.2.0": {},
+          "react@19.1.1": {},
+        },
+      };
+
+      const lockfilePath = writeMockLockfile(nonInjectedLinkLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
+
+      // foundation-react should be tracked as using react v18 directly
+      const react18Importers =
+        await tracker.getImportersForPackage("react@18.2.0");
+      expect(react18Importers).toContain("packages/webapp/foundation-react");
+
+      // fetch-utils should be tracked as using react v19
+      const react19Importers =
+        await tracker.getImportersForPackage("react@19.1.1");
+      expect(react19Importers).toContain("packages/webapp/fetch-utils");
+
+      // IMPORTANT: foundation-react should ALSO be tracked as transitively using react v19
+      // through the linked fetch-utils dependency
+      expect(react19Importers).toContain("packages/webapp/foundation-react");
+    });
+
+    it("should detect version conflicts in linked workspace dependencies", async () => {
+      const conflictLockfile: PnpmLockfile = {
+        lockfileVersion: "9.0",
+        importers: {
+          "packages/webapp/foundation-react": {
+            dependencies: {
+              "@my/fetch-utils": {
+                specifier: "workspace:*",
+                version: "link:../fetch-utils",
+              },
+              react: {
+                specifier: "18.2.0",
+                version: "18.2.0",
+              },
+            },
+          },
+          "packages/webapp/fetch-utils": {
+            dependencies: {
+              react: {
+                specifier: "19.1.1",
+                version: "19.1.1",
+              },
+              lodash: {
+                specifier: "4.17.21",
+                version: "4.17.21",
+              },
+            },
+          },
+        },
+        packages: {
+          "react@18.2.0": {
+            resolution: { integrity: "sha512-react18" },
+          },
+          "react@19.1.1": {
+            resolution: { integrity: "sha512-react19" },
+          },
+          "lodash@4.17.21": {
+            resolution: { integrity: "sha512-lodash" },
+          },
+        },
+        snapshots: {
+          "react@18.2.0": {},
+          "react@19.1.1": {},
+          "lodash@4.17.21": {},
+        },
+      };
+
+      const lockfilePath = writeMockLockfile(conflictLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
+
+      // Both versions of react should be tracked as used by foundation-react
+      const react18Importers =
+        await tracker.getImportersForPackage("react@18.2.0");
+      const react19Importers =
+        await tracker.getImportersForPackage("react@19.1.1");
+
+      expect(react18Importers).toContain("packages/webapp/foundation-react");
+      expect(react19Importers).toContain("packages/webapp/foundation-react");
+
+      // lodash should also be tracked as transitively used by foundation-react
+      const lodashImporters =
+        await tracker.getImportersForPackage("lodash@4.17.21");
+      expect(lodashImporters).toContain("packages/webapp/foundation-react");
+      expect(lodashImporters).toContain("packages/webapp/fetch-utils");
+    });
+
+    it("should handle multi-level non-injected workspace dependency chains", async () => {
+      const chainLockfile: PnpmLockfile = {
+        lockfileVersion: "9.0",
+        importers: {
+          "packages/webapp/ui-react": {
+            dependencies: {
+              "@my/foundation-react": {
+                specifier: "workspace:*",
+                version: "link:../foundation-react",
+              },
+              react: {
+                specifier: "18.2.0",
+                version: "18.2.0",
+              },
+            },
+          },
+          "packages/webapp/foundation-react": {
+            dependencies: {
+              "@my/fetch-utils": {
+                specifier: "workspace:*",
+                version: "link:../fetch-utils",
+              },
+              react: {
+                specifier: "18.2.0",
+                version: "18.2.0",
+              },
+            },
+          },
+          "packages/webapp/fetch-utils": {
+            dependencies: {
+              react: {
+                specifier: "19.1.1",
+                version: "19.1.1",
+              },
+            },
+          },
+        },
+        packages: {
+          "react@18.2.0": {
+            resolution: { integrity: "sha512-react18" },
+          },
+          "react@19.1.1": {
+            resolution: { integrity: "sha512-react19" },
+          },
+        },
+        snapshots: {
+          "react@18.2.0": {},
+          "react@19.1.1": {},
+        },
+      };
+
+      const lockfilePath = writeMockLockfile(chainLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
+
+      // ui-react should transitively depend on react v19 through the chain:
+      // ui-react -> foundation-react -> fetch-utils -> react v19
+      const react19Importers =
+        await tracker.getImportersForPackage("react@19.1.1");
+
+      expect(react19Importers).toContain("packages/webapp/fetch-utils");
+      expect(react19Importers).toContain("packages/webapp/foundation-react");
+      expect(react19Importers).toContain("packages/webapp/ui-react");
+    });
+
+    it("should track dependencies through injected workspace package -> linked package -> transitive deps", async () => {
+      const injectedLinkLockfile: PnpmLockfile = {
+        lockfileVersion: "9.0",
+        importers: {
+          "apps/attendance-webapp": {
+            dependencies: {
+              "@my/ui-react": {
+                specifier: "workspace:*",
+                version:
+                  "file:packages/webapp/ui-react(@floating-ui/react@0.26.4)(react-dom@18.2.0)(react@18.2.0)",
+              },
+              react: {
+                specifier: "18.2.0",
+                version: "18.2.0",
+              },
+              "react-dom": {
+                specifier: "18.2.0",
+                version: "18.2.0(react@18.2.0)",
+              },
+            },
+          },
+          "packages/webapp/ui-react": {
+            dependencies: {
+              "@my/fetch-utils": {
+                specifier: "workspace:*",
+                version: "link:../fetch-utils",
+              },
+              react: {
+                specifier: "18.2.0",
+                version: "18.2.0",
+              },
+            },
+          },
+          "packages/webapp/fetch-utils": {
+            dependencies: {
+              react: {
+                specifier: "19.1.1",
+                version: "19.1.1",
+              },
+            },
+          },
+        },
+        packages: {
+          "@my/ui-react@file:packages/webapp/ui-react": {
+            resolution: {
+              directory: "packages/webapp/ui-react",
+              type: "directory",
+            },
+            name: "@my/ui-react",
+            version: "0.0.0",
+          },
+          "react@18.2.0": {
+            resolution: { integrity: "sha512-react18" },
+          },
+          "react@19.1.1": {
+            resolution: { integrity: "sha512-react19" },
+          },
+          "react-dom@18.2.0": {
+            resolution: { integrity: "sha512-reactdom18" },
+            peerDependencies: { react: "^18.2.0" },
+          },
+        },
+        snapshots: {
+          "@my/ui-react@file:packages/webapp/ui-react(@floating-ui/react@0.26.4)(react-dom@18.2.0)(react@18.2.0)":
+            {
+              dependencies: {
+                react: "18.2.0",
+                "react-dom": "18.2.0(react@18.2.0)",
+              },
+            },
+          "react@18.2.0": {},
+          "react@19.1.1": {},
+          "react-dom@18.2.0(react@18.2.0)": {
+            dependencies: {
+              react: "18.2.0",
+            },
+          },
+        },
+      };
+
+      const lockfilePath = writeMockLockfile(injectedLinkLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
+
+      // attendance-webapp uses ui-react as an injected workspace dependency
+      // ui-react links to fetch-utils which has react v19
+      // All three should be tracked as using react v19
+      const react19Importers =
+        await tracker.getImportersForPackage("react@19.1.1");
+
+      expect(react19Importers).toContain("packages/webapp/fetch-utils");
+      expect(react19Importers).toContain("packages/webapp/ui-react");
+      expect(react19Importers).toContain("apps/attendance-webapp");
+    });
+  });
 });

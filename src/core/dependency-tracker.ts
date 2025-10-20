@@ -165,38 +165,13 @@ export class DependencyTracker {
         if (version.startsWith("link:")) {
           const resolvedImporter = this.resolveLinkPath(importerId, version);
           if (resolvedImporter && lockfile.importers?.[resolvedImporter]) {
-            // Add dependencies from the linked importer
-            const linkedImporterData = lockfile.importers[resolvedImporter];
-            const linkedDeps = {
-              ...linkedImporterData.dependencies,
-              ...linkedImporterData.devDependencies,
-              ...linkedImporterData.optionalDependencies,
-            };
-
-            for (const [linkedDepName, linkedDepInfo] of Object.entries(
-              linkedDeps || {},
-            )) {
-              const linkedVersion = linkedDepInfo.version;
-              const transitiveDeps = this.buildTransitiveDepsFromLockfile(
-                linkedDepName,
-                linkedVersion,
-                lockfile,
-                new Set(),
-              );
-
-              const node: PackageNode = {
-                alias: linkedDepName,
-                name: linkedDepName,
-                version: linkedVersion,
-                path: `node_modules/${linkedDepName}`,
-                isPeer: false,
-                isSkipped: false,
-                isMissing: false,
-                dependencies: transitiveDeps,
-              };
-
-              nodes.push(node);
-            }
+            // Recursively collect all dependencies from linked importers
+            const linkedNodes = this.buildLinkedDependencyNodes(
+              resolvedImporter,
+              lockfile,
+              new Set([importerId]),
+            );
+            nodes.push(...linkedNodes);
           }
           continue;
         }
@@ -229,6 +204,73 @@ export class DependencyTracker {
   }
 
   /**
+   * Recursively build dependency nodes from linked importers
+   * Handles nested workspace links to ensure all transitive dependencies are tracked
+   */
+  private buildLinkedDependencyNodes(
+    importerId: string,
+    lockfile: PnpmLockfile,
+    visitedImporters: Set<string>,
+  ): PackageNode[] {
+    // Prevent infinite recursion on circular workspace links
+    if (visitedImporters.has(importerId)) {
+      return [];
+    }
+    visitedImporters.add(importerId);
+
+    const nodes: PackageNode[] = [];
+    const importerData = lockfile.importers?.[importerId];
+    if (!importerData) return nodes;
+
+    const allDeps = {
+      ...importerData.dependencies,
+      ...importerData.devDependencies,
+      ...importerData.optionalDependencies,
+    };
+
+    for (const [depName, depInfo] of Object.entries(allDeps || {})) {
+      const version = depInfo.version;
+
+      // Recursively handle nested linked dependencies
+      if (version.startsWith("link:")) {
+        const resolvedImporter = this.resolveLinkPath(importerId, version);
+        if (resolvedImporter && lockfile.importers?.[resolvedImporter]) {
+          const nestedNodes = this.buildLinkedDependencyNodes(
+            resolvedImporter,
+            lockfile,
+            new Set(visitedImporters),
+          );
+          nodes.push(...nestedNodes);
+        }
+        continue;
+      }
+
+      // Build regular dependency node with transitive dependencies
+      const transitiveDeps = this.buildTransitiveDepsFromLockfile(
+        depName,
+        version,
+        lockfile,
+        new Set(),
+      );
+
+      const node: PackageNode = {
+        alias: depName,
+        name: depName,
+        version: version,
+        path: `node_modules/${depName}`,
+        isPeer: false,
+        isSkipped: false,
+        isMissing: false,
+        dependencies: transitiveDeps,
+      };
+
+      nodes.push(node);
+    }
+
+    return nodes;
+  }
+
+  /**
    * Build transitive dependencies from lockfile (fallback for tests)
    */
   private buildTransitiveDepsFromLockfile(
@@ -236,6 +278,7 @@ export class DependencyTracker {
     packageVersion: string,
     lockfile: PnpmLockfile,
     visited: Set<string>,
+    visitedImporters?: Set<string>,
   ): PackageNode[] | undefined {
     const packageId = `${packageName}@${packageVersion}`;
     if (visited.has(packageId)) return undefined;
@@ -262,13 +305,41 @@ export class DependencyTracker {
           childVersion,
           lockfile,
           visited,
+          visitedImporters,
         ),
       };
 
       childNodes.push(childNode);
     }
 
+    // For injected workspace packages (file:), also include linked dependencies from the workspace importer
+    if (packageVersion.startsWith("file:")) {
+      const importerPath =
+        this.extractImporterPathFromFileVersion(packageVersion);
+      if (
+        importerPath &&
+        lockfile.importers?.[importerPath] &&
+        (!visitedImporters || !visitedImporters.has(importerPath))
+      ) {
+        const linkedNodes = this.buildLinkedDependencyNodes(
+          importerPath,
+          lockfile,
+          visitedImporters || new Set(),
+        );
+        childNodes.push(...linkedNodes);
+      }
+    }
+
     return childNodes.length > 0 ? childNodes : undefined;
+  }
+
+  /**
+   * Extract importer path from file: version string
+   * E.g., "file:packages/webapp/ui-react(...)" -> "packages/webapp/ui-react"
+   */
+  private extractImporterPathFromFileVersion(version: string): string | null {
+    const match = version.match(/^file:([^(]+)/);
+    return match?.[1] ?? null;
   }
 
   /**
@@ -355,9 +426,6 @@ export class DependencyTracker {
       }
     }
   }
-
-
-
 
   /**
    * Get all importers that use a given package (directly or transitively)
