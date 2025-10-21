@@ -310,7 +310,7 @@ export class DuplicatesUsecase {
     const instancesMap = new Map<string, PackageInstance>();
 
     for (const [importerPath, tree] of Object.entries(trees)) {
-      this.collectFromTreeNodes(tree, importerPath, instancesMap);
+      this.collectFromTreeNodes(tree, importerPath, instancesMap, new Set());
     }
 
     return instancesMap;
@@ -323,8 +323,15 @@ export class DuplicatesUsecase {
     nodes: PackageNode[],
     importerPath: string,
     instancesMap: Map<string, PackageInstance>,
+    visitedNodes: Set<PackageNode> = new Set(),
   ): void {
     for (const node of nodes) {
+      // Prevent infinite recursion from circular node references
+      if (visitedNodes.has(node)) {
+        continue;
+      }
+      visitedNodes.add(node);
+
       const instanceId = `${node.name}@${node.version}`;
       const parsed = parsePackageString(instanceId);
 
@@ -349,6 +356,7 @@ export class DuplicatesUsecase {
             node.dependencies,
             importerPath,
             instancesMap,
+            visitedNodes,
           );
         }
       }
@@ -863,7 +871,7 @@ export class DuplicatesUsecase {
       instanceId,
     );
 
-    // Get all paths for diamond dependencies
+    // Get all paths - now safe with circular detection
     const allPaths = await this.dependencyTracker.getAllDependencyPaths(
       importerPath,
       instanceId,
@@ -880,7 +888,7 @@ export class DuplicatesUsecase {
     return {
       typeSummary,
       path: finalPath,
-      allPaths: allPaths.length > 1 ? allPaths : undefined, // Only include if multiple paths exist
+      allPaths: allPaths.length > 1 ? allPaths : undefined,
     };
   }
 

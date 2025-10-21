@@ -153,9 +153,11 @@ export class DependencyTracker {
    */
   private enrichTreesWithLinkedWorkspaceDeps(): void {
     const lockfile = this.getLockfile();
+    // Use a global visited set to prevent infinite recursion across all trees
+    const globalVisited = new Set<string>();
 
     for (const nodes of Object.values(this.dependencyTrees)) {
-      this.enrichNodesWithLinkedDeps(nodes, lockfile);
+      this.enrichNodesWithLinkedDeps(nodes, lockfile, globalVisited);
     }
   }
 
@@ -165,8 +167,16 @@ export class DependencyTracker {
   private enrichNodesWithLinkedDeps(
     nodes: PackageNode[],
     lockfile: PnpmLockfile,
+    visitedImporters: Set<string>,
+    visitedNodes: Set<PackageNode> = new Set(),
   ): void {
     for (const node of nodes) {
+      // Prevent re-processing the same node
+      if (visitedNodes.has(node)) {
+        continue;
+      }
+      visitedNodes.add(node);
+
       // Check if this is a workspace package (file: version)
       if (node.version.startsWith("file:")) {
         const snapshotKey = `${node.name}@${node.version}`;
@@ -209,7 +219,8 @@ export class DependencyTracker {
 
                 if (
                   resolvedImporter &&
-                  lockfile.importers?.[resolvedImporter]
+                  lockfile.importers?.[resolvedImporter] &&
+                  !visitedImporters.has(resolvedImporter)
                 ) {
                   // Always use standalone importer for links to detect runtime conflicts
                   // Even if a contextualized snapshot exists, the filesystem link resolves
@@ -217,7 +228,7 @@ export class DependencyTracker {
                   const linkDeps = this.buildLinkedDependencyNodes(
                     resolvedImporter,
                     lockfile,
-                    new Set(),
+                    visitedImporters,
                   );
 
                   if (existingChild) {
@@ -258,7 +269,12 @@ export class DependencyTracker {
 
       // Recursively process children
       if (node.dependencies) {
-        this.enrichNodesWithLinkedDeps(node.dependencies, lockfile);
+        this.enrichNodesWithLinkedDeps(
+          node.dependencies,
+          lockfile,
+          visitedImporters,
+          visitedNodes,
+        );
       }
     }
   }
@@ -750,7 +766,7 @@ export class DependencyTracker {
       throw new Error(`No dependency tree found for importer: ${importerPath}`);
     }
 
-    const path = this.findPathInTree(tree, packageId, []);
+    const path = this.findPathInTree(tree, packageId, [], new Set(), 0);
 
     if (!path) {
       throw new Error(
@@ -768,9 +784,20 @@ export class DependencyTracker {
     nodes: PackageNode[],
     targetPackageId: string,
     currentPath: DependencyPathStep[],
+    visitedNodeIds: Set<string>,
+    depth: number,
   ): DependencyPathStep[] | null {
+    // Depth limit to prevent stack overflow even with cycles
+    if (depth > 100) {
+      return null;
+    }
     for (const node of nodes) {
       const nodeId = `${node.name}@${node.version}`;
+
+      // Prevent infinite recursion from circular dependencies in current path
+      if (visitedNodeIds.has(nodeId)) {
+        continue;
+      }
 
       const step: DependencyPathStep = {
         package: nodeId,
@@ -795,12 +822,24 @@ export class DependencyTracker {
       }
 
       if (node.dependencies) {
+        // Add nodeId to visited for this path
+        visitedNodeIds.add(nodeId);
+
         const childPath = this.findPathInTree(
           node.dependencies,
           targetPackageId,
           newPath,
+          visitedNodeIds,
+          depth + 1,
         );
-        if (childPath) return childPath;
+
+        if (childPath) {
+          // Don't delete - keep in visited to prevent cycles
+          return childPath;
+        }
+
+        // Remove after exploring this branch
+        visitedNodeIds.delete(nodeId);
       }
     }
 
@@ -809,6 +848,7 @@ export class DependencyTracker {
 
   /**
    * Get all dependency paths from importer to package (hybrid: tree-based + fallback)
+   * Circular dependencies are detected and marked in paths
    */
   async getAllDependencyPaths(
     importerPath: string,
@@ -821,22 +861,36 @@ export class DependencyTracker {
       throw new Error(`No dependency tree found for importer: ${importerPath}`);
     }
 
-    const allPaths = this.findAllPathsInTree(tree, packageId, []);
-    return allPaths;
+    const paths: DependencyPathStep[][] = [];
+    this.findAllPathsInTree(tree, packageId, [], new Set(), 0, paths);
+    return paths;
   }
 
   /**
    * Find all paths to target package in tree
+   * Detects and marks circular dependencies by tracking node IDs in current path
    */
   private findAllPathsInTree(
     nodes: PackageNode[],
     targetPackageId: string,
     currentPath: DependencyPathStep[],
-  ): DependencyPathStep[][] {
-    const paths: DependencyPathStep[][] = [];
+    visitedNodeIds: Set<string>,
+    depth: number,
+    paths: DependencyPathStep[][],
+  ): void {
+    // Depth limit to prevent stack overflow
+    if (depth > 100) {
+      return;
+    }
 
     for (const node of nodes) {
       const nodeId = `${node.name}@${node.version}`;
+
+      // Check if this node ID creates a circular dependency in current path
+      if (visitedNodeIds.has(nodeId)) {
+        // Skip this path - circular dependency that doesn't lead to target
+        continue;
+      }
 
       const step: DependencyPathStep = {
         package: nodeId,
@@ -861,15 +915,21 @@ export class DependencyTracker {
       }
 
       if (node.dependencies) {
-        const childPaths = this.findAllPathsInTree(
+        // Add nodeId to visited for this path branch
+        visitedNodeIds.add(nodeId);
+
+        this.findAllPathsInTree(
           node.dependencies,
           targetPackageId,
           newPath,
+          visitedNodeIds,
+          depth + 1,
+          paths,
         );
-        paths.push(...childPaths);
+
+        // Remove after exploring this branch to allow node in other paths
+        visitedNodeIds.delete(nodeId);
       }
     }
-
-    return paths;
   }
 }

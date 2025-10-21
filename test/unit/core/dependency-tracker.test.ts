@@ -1281,5 +1281,76 @@ describe("DependencyTracker", () => {
       expect(react18Importers).toContain("packages/lib-b");
       expect(react18Importers).toContain("apps/app-a");
     });
+
+    it("should handle circular workspace dependencies without infinite recursion", async () => {
+      // Scenario: lib-a (file:) has link to lib-b, lib-b has link to lib-a (circular)
+      const circularLockfile: PnpmLockfile = {
+        lockfileVersion: "9.0",
+        importers: {
+          "apps/app": {
+            dependencies: {
+              "@my/lib-a": {
+                specifier: "workspace:*",
+                version: "file:../../packages/lib-a",
+              },
+            },
+          },
+          "packages/lib-a": {
+            dependencies: {
+              "@my/lib-b": {
+                specifier: "workspace:*",
+                version: "link:../lib-b",
+              },
+              react: {
+                specifier: "18.2.0",
+                version: "18.2.0",
+              },
+            },
+          },
+          "packages/lib-b": {
+            dependencies: {
+              "@my/lib-a": {
+                specifier: "workspace:*",
+                version: "link:../lib-a",
+              },
+            },
+          },
+        },
+        packages: {
+          "@my/lib-a@file:../../packages/lib-a": {
+            resolution: {
+              directory: "../../packages/lib-a",
+              type: "directory",
+            },
+            name: "@my/lib-a",
+            version: "0.0.0",
+          },
+          "react@18.2.0": {
+            resolution: { integrity: "sha512-react18" },
+          },
+        },
+        snapshots: {
+          "@my/lib-a@file:../../packages/lib-a": {
+            dependencies: {
+              "@my/lib-b": "link:../lib-b",
+              react: "18.2.0",
+            },
+          },
+          "react@18.2.0": {},
+        },
+      };
+
+      const lockfilePath = writeMockLockfile(circularLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
+
+      // Should handle circular dependency without infinite recursion
+      const react18Importers =
+        await tracker.getImportersForPackage("react@18.2.0");
+
+      // All should be tracked (circular structure shouldn't prevent tracking)
+      expect(react18Importers).toContain("packages/lib-a");
+      expect(react18Importers).toContain("packages/lib-b");
+      expect(react18Importers).toContain("apps/app");
+    });
   });
 });
