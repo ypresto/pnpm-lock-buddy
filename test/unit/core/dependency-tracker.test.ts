@@ -1352,5 +1352,90 @@ describe("DependencyTracker", () => {
       expect(react18Importers).toContain("packages/lib-b");
       expect(react18Importers).toContain("apps/app");
     });
+
+    it("should not show circular marker when searching for the circular package itself", async () => {
+      // Scenario: app -> lib-a, lib-a -> lib-b, lib-b -> lib-a (circular)
+      // When searching for lib-a, should show:
+      //   - app -> lib-a (first occurrence)
+      // Should NOT show:
+      //   - app -> lib-a -> lib-b -> lib-a (circular)
+      const circularSearchLockfile: PnpmLockfile = {
+        lockfileVersion: "9.0",
+        importers: {
+          "apps/app": {
+            dependencies: {
+              "@my/lib-a": {
+                specifier: "workspace:*",
+                version: "file:../../packages/lib-a",
+              },
+            },
+          },
+          "packages/lib-a": {
+            dependencies: {
+              "@my/lib-b": {
+                specifier: "workspace:*",
+                version: "link:../lib-b",
+              },
+              react: {
+                specifier: "18.2.0",
+                version: "18.2.0",
+              },
+            },
+          },
+          "packages/lib-b": {
+            dependencies: {
+              "@my/lib-a": {
+                specifier: "workspace:*",
+                version: "link:../lib-a",
+              },
+            },
+          },
+        },
+        packages: {
+          "@my/lib-a@file:../../packages/lib-a": {
+            resolution: {
+              directory: "../../packages/lib-a",
+              type: "directory",
+            },
+            name: "@my/lib-a",
+            version: "0.0.0",
+          },
+          "react@18.2.0": {
+            resolution: { integrity: "sha512-react18" },
+          },
+        },
+        snapshots: {
+          "@my/lib-a@file:../../packages/lib-a": {
+            dependencies: {
+              "@my/lib-b": "link:../lib-b",
+              react: "18.2.0",
+            },
+          },
+          "react@18.2.0": {},
+        },
+      };
+
+      const lockfilePath = writeMockLockfile(circularSearchLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
+
+      // Get all paths to lib-a
+      const libAPaths = await tracker.getAllDependencyPaths(
+        "apps/app",
+        "@my/lib-a@file:../../packages/lib-a",
+      );
+
+      // Should have exactly 1 path: app -> lib-a
+      expect(libAPaths.length).toBe(1);
+      expect(libAPaths[0]).toHaveLength(1);
+      expect(libAPaths[0][0].package).toBe(
+        "@my/lib-a@file:../../packages/lib-a",
+      );
+
+      // Should NOT have circular marker for lib-a itself
+      const hasCircularMarker = libAPaths.some((path) =>
+        path.some((step) => step.package.includes("(circular)")),
+      );
+      expect(hasCircularMarker).toBe(false);
+    });
   });
 });
