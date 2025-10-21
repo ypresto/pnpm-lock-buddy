@@ -375,7 +375,9 @@ export function formatDuplicates(
 
         // Mark hoisted versions with prefix
         const hoistedPrefix = instance.hoisted
-          ? (useColor ? chalk.magenta("--(hoisted)-- ") : "--(hoisted)-- ")
+          ? useColor
+            ? chalk.magenta("--(hoisted)-- ")
+            : "--(hoisted)-- "
           : "";
 
         const displayVersion = `${hoistedPrefix}${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
@@ -470,8 +472,8 @@ export function formatPerProjectDuplicates(
   for (const [packageName, importerGroups] of packageGroups.entries()) {
     // Get hoisted versions for this package
     const pkgWithHoist = perProjectDuplicates
-      .flatMap(p => p.duplicatePackages)
-      .find(pkg => pkg.packageName === packageName && pkg.hoistedVersions);
+      .flatMap((p) => p.duplicatePackages)
+      .find((pkg) => pkg.packageName === packageName && pkg.hoistedVersions);
     const hoistedVersions = pkgWithHoist?.hoistedVersions;
 
     let header = `\n${packageColor(packageName)}`;
@@ -529,7 +531,9 @@ export function formatPerProjectDuplicates(
             const versionNum = versionMap.get(versionKey);
 
             const hoistedPrefix = instance.hoisted
-              ? (useColor ? chalk.magenta("--(hoisted)-- ") : "--(hoisted)-- ")
+              ? useColor
+                ? chalk.magenta("--(hoisted)-- ")
+                : "--(hoisted)-- "
               : "";
 
             const displayVersion = `${hoistedPrefix}${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;
@@ -548,7 +552,9 @@ export function formatPerProjectDuplicates(
           const versionNum = versionMap.get(versionKey);
 
           const hoistedPrefix = instance.hoisted
-            ? (useColor ? chalk.magenta("--(hoisted)-- ") : "--(hoisted)-- ")
+            ? useColor
+              ? chalk.magenta("--(hoisted)-- ")
+              : "--(hoisted)-- "
             : "";
 
           const displayVersion = `${hoistedPrefix}${versionColor(instance.id)} ${numberColor(`[${versionNum}]`)}`;

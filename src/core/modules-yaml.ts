@@ -89,7 +89,10 @@ export function detectHoistConflicts(
   }
 
   // Group hoisted packages by base package name and hoisted name
-  const packageVersions = new Map<string, Array<{spec: string, hoistedAs: string}>>();
+  const packageVersions = new Map<
+    string,
+    Array<{ spec: string; hoistedAs: string }>
+  >();
 
   for (const [packageSpec, hoistInfo] of Object.entries(
     modulesYaml.hoistedDependencies,
@@ -103,9 +106,7 @@ export function detectHoistConflicts(
       if (packageFilter && packageFilter.length > 0) {
         const matches = packageFilter.some((filter) => {
           if (filter.includes("*")) {
-            const regex = new RegExp(
-              "^" + filter.replace(/\*/g, ".*") + "$",
-            );
+            const regex = new RegExp("^" + filter.replace(/\*/g, ".*") + "$");
             return regex.test(packageName);
           }
           return packageName === filter;
@@ -116,7 +117,7 @@ export function detectHoistConflicts(
       if (!packageVersions.has(packageName)) {
         packageVersions.set(packageName, []);
       }
-      packageVersions.get(packageName)!.push({spec: packageSpec, hoistedAs});
+      packageVersions.get(packageName)!.push({ spec: packageSpec, hoistedAs });
     } catch (error) {
       // Skip packages that can't be parsed
       continue;
@@ -128,7 +129,10 @@ export function detectHoistConflicts(
 
   for (const [packageName, entries] of packageVersions.entries()) {
     // Group by hoisted name
-    const byHoistedName = new Map<string, Array<{spec: string, hoistedAs: string}>>();
+    const byHoistedName = new Map<
+      string,
+      Array<{ spec: string; hoistedAs: string }>
+    >();
     for (const entry of entries) {
       if (!byHoistedName.has(entry.hoistedAs)) {
         byHoistedName.set(entry.hoistedAs, []);
