@@ -376,6 +376,7 @@ export class DependencyTracker {
         version,
         lockfile,
         new Set(),
+        visitedImporters,
       );
 
       const node: PackageNode = {
@@ -485,8 +486,12 @@ export class DependencyTracker {
 
     // For injected workspace packages (file:), also include linked dependencies from the workspace importer
     if (packageVersion.startsWith("file:")) {
-      const importerPath =
-        this.extractImporterPathFromFileVersion(packageVersion);
+      const rawPath = this.extractImporterPathFromFileVersion(packageVersion);
+      // The file: path might be relative - need to find the actual importer key
+      const importerPath = rawPath
+        ? this.findImporterByFilePath(rawPath, lockfile)
+        : null;
+
       if (
         importerPath &&
         lockfile.importers?.[importerPath] &&
@@ -511,6 +516,41 @@ export class DependencyTracker {
   private extractImporterPathFromFileVersion(version: string): string | null {
     const match = version.match(/^file:([^(]+)/);
     return match?.[1] ?? null;
+  }
+
+  /**
+   * Find the actual importer key by matching file path
+   * file: paths are relative to lockfileDir (workspace root)
+   * Use path.posix for standard path resolution (lockfiles always use forward slashes)
+   */
+  private findImporterByFilePath(
+    filePath: string,
+    lockfile: PnpmLockfile,
+  ): string | null {
+    // Direct match (most common case)
+    if (lockfile.importers?.[filePath]) {
+      return filePath;
+    }
+
+    // Resolve path from workspace root using path.posix
+    // Since file: paths are relative to workspace root, resolve from root
+    const resolvedPath = path.posix.normalize(filePath);
+
+    // Strip leading ../ segments (can't go above workspace root)
+    const cleanPath = resolvedPath.replace(/^(?:\.\.\/)+/, "");
+
+    // Also try with ./ removed
+    const withoutDotSlash = cleanPath.replace(/^\.\//, "");
+
+    if (lockfile.importers?.[cleanPath]) {
+      return cleanPath;
+    }
+
+    if (lockfile.importers?.[withoutDotSlash]) {
+      return withoutDotSlash;
+    }
+
+    return null;
   }
 
   /**

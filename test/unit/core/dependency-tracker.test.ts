@@ -1098,5 +1098,188 @@ describe("DependencyTracker", () => {
       );
       expect(react18InFoundation).toBeDefined();
     });
+
+    it("should handle complex nesting: link -> injected -> link -> injected -> react", async () => {
+      // Scenario: app-a (link to lib-b) -> lib-b (injected lib-c) -> lib-c (link to lib-d) -> lib-d (injected lib-e) -> lib-e (react@18)
+      const complexNestingLockfile: PnpmLockfile = {
+        lockfileVersion: "9.0",
+        importers: {
+          "apps/app-a": {
+            dependencies: {
+              "@my/lib-b": {
+                specifier: "workspace:*",
+                version: "link:../../packages/lib-b",
+              },
+            },
+          },
+          "packages/lib-b": {
+            dependencies: {
+              "@my/lib-c": {
+                specifier: "workspace:*",
+                version: "file:packages/lib-c",
+              },
+            },
+          },
+          "packages/lib-c": {
+            dependencies: {
+              "@my/lib-d": {
+                specifier: "workspace:*",
+                version: "link:../lib-d",
+              },
+            },
+          },
+          "packages/lib-d": {
+            dependencies: {
+              "@my/lib-e": {
+                specifier: "workspace:*",
+                version: "file:packages/lib-e",
+              },
+            },
+          },
+          "packages/lib-e": {
+            dependencies: {
+              react: {
+                specifier: "18.2.0",
+                version: "18.2.0",
+              },
+            },
+          },
+        },
+        packages: {
+          "@my/lib-c@file:packages/lib-c": {
+            resolution: { directory: "packages/lib-c", type: "directory" },
+            name: "@my/lib-c",
+            version: "0.0.0",
+          },
+          "@my/lib-e@file:packages/lib-e": {
+            resolution: { directory: "packages/lib-e", type: "directory" },
+            name: "@my/lib-e",
+            version: "0.0.0",
+          },
+          "react@18.2.0": {
+            resolution: { integrity: "sha512-react18" },
+          },
+        },
+        snapshots: {
+          "@my/lib-c@file:packages/lib-c": {
+            dependencies: {
+              "@my/lib-d": "link:../lib-d",
+            },
+          },
+          "@my/lib-e@file:packages/lib-e": {
+            dependencies: {
+              react: "18.2.0",
+            },
+          },
+          "react@18.2.0": {},
+        },
+      };
+
+      const lockfilePath = writeMockLockfile(complexNestingLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
+
+      // All levels should be tracked as using react@18.2.0
+      const react18Importers =
+        await tracker.getImportersForPackage("react@18.2.0");
+
+      expect(react18Importers).toContain("packages/lib-e");
+      expect(react18Importers).toContain("packages/lib-d");
+      expect(react18Importers).toContain("packages/lib-c");
+      expect(react18Importers).toContain("packages/lib-b");
+      expect(react18Importers).toContain("apps/app-a");
+    });
+
+    it("should handle complex nesting: injected -> link -> injected -> link -> react", async () => {
+      // Scenario: app-a (injected lib-b) -> lib-b (link to lib-c) -> lib-c (injected lib-d) -> lib-d (link to lib-e) -> lib-e (react@18)
+      const complexNesting2Lockfile: PnpmLockfile = {
+        lockfileVersion: "9.0",
+        importers: {
+          "apps/app-a": {
+            dependencies: {
+              "@my/lib-b": {
+                specifier: "workspace:*",
+                version: "file:../../packages/lib-b",
+              },
+            },
+          },
+          "packages/lib-b": {
+            dependencies: {
+              "@my/lib-c": {
+                specifier: "workspace:*",
+                version: "link:../lib-c",
+              },
+            },
+          },
+          "packages/lib-c": {
+            dependencies: {
+              "@my/lib-d": {
+                specifier: "workspace:*",
+                version: "file:packages/lib-d",
+              },
+            },
+          },
+          "packages/lib-d": {
+            dependencies: {
+              "@my/lib-e": {
+                specifier: "workspace:*",
+                version: "link:../lib-e",
+              },
+            },
+          },
+          "packages/lib-e": {
+            dependencies: {
+              react: {
+                specifier: "18.2.0",
+                version: "18.2.0",
+              },
+            },
+          },
+        },
+        packages: {
+          "@my/lib-b@file:../../packages/lib-b": {
+            resolution: {
+              directory: "../../packages/lib-b",
+              type: "directory",
+            },
+            name: "@my/lib-b",
+            version: "0.0.0",
+          },
+          "@my/lib-d@file:../lib-d": {
+            resolution: { directory: "../lib-d", type: "directory" },
+            name: "@my/lib-d",
+            version: "0.0.0",
+          },
+          "react@18.2.0": {
+            resolution: { integrity: "sha512-react18" },
+          },
+        },
+        snapshots: {
+          "@my/lib-b@file:../../packages/lib-b": {
+            dependencies: {
+              "@my/lib-c": "link:../lib-c",
+            },
+          },
+          "@my/lib-d@file:packages/lib-d": {
+            dependencies: {
+              "@my/lib-e": "link:../lib-e",
+            },
+          },
+          "react@18.2.0": {},
+        },
+      };
+
+      const lockfilePath = writeMockLockfile(complexNesting2Lockfile);
+      const tracker = new DependencyTracker(lockfilePath);
+
+      // All levels should be tracked as using react@18.2.0
+      const react18Importers =
+        await tracker.getImportersForPackage("react@18.2.0");
+
+      expect(react18Importers).toContain("packages/lib-e");
+      expect(react18Importers).toContain("packages/lib-d");
+      expect(react18Importers).toContain("packages/lib-c");
+      expect(react18Importers).toContain("packages/lib-b");
+      expect(react18Importers).toContain("apps/app-a");
+    });
   });
 });
