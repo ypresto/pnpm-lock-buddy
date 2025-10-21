@@ -23,6 +23,7 @@ export class DependencyTracker {
   private dependencyMap = new Map<string, PackageDependencyInfo>();
   private importerCache = new Map<string, string[]>(); // packageId -> importers (cached)
   private linkedDependencies = new Map<string, LinkedDependencyInfo[]>(); // importer -> linked deps
+  private allPathsCache = new Map<string, DependencyPathStep[][]>(); // (importerPath, packageId) -> paths (cached)
   private initPromise: Promise<void> | null = null;
 
   constructor(lockfilePath: string, depth: number = 10) {
@@ -869,11 +870,21 @@ export class DependencyTracker {
   /**
    * Get all dependency paths from importer to package (hybrid: tree-based + fallback)
    * Circular dependencies are detected and marked in paths
+   * Limited to maxPaths to avoid exponential explosion for popular packages
+   * Results are cached to avoid recomputing
    */
   async getAllDependencyPaths(
     importerPath: string,
     packageId: string,
+    maxPaths: number = 10, // Limit to 10 paths to prevent exponential explosion
   ): Promise<DependencyPathStep[][]> {
+    const cacheKey = `${importerPath}::${packageId}::${maxPaths}`;
+
+    // Check cache first
+    if (this.allPathsCache.has(cacheKey)) {
+      return this.allPathsCache.get(cacheKey)!;
+    }
+
     await this.initialize();
 
     const tree = this.dependencyTrees[importerPath];
@@ -882,13 +893,18 @@ export class DependencyTracker {
     }
 
     const paths: DependencyPathStep[][] = [];
-    this.findAllPathsInTree(tree, packageId, [], new Set(), 0, paths);
+    this.findAllPathsInTree(tree, packageId, [], new Set(), 0, paths, maxPaths);
+
+    // Cache the result
+    this.allPathsCache.set(cacheKey, paths);
+
     return paths;
   }
 
   /**
    * Find all paths to target package in tree
    * Detects and marks circular dependencies by tracking node IDs in current path
+   * Stops early once maxPaths is reached to prevent exponential explosion
    */
   private findAllPathsInTree(
     nodes: PackageNode[],
@@ -897,10 +913,17 @@ export class DependencyTracker {
     visitedNodeIds: Set<string>,
     depth: number,
     paths: DependencyPathStep[][],
-  ): void {
-    // Depth limit to prevent stack overflow
-    if (depth > 100) {
-      return;
+    maxPaths: number = 10,
+  ): boolean {
+    // Depth limit to prevent deep recursion and improve performance
+    // Reduced to 50 for faster search when finding allPaths
+    if (depth > 50) {
+      return true; // Continue searching other branches
+    }
+
+    // Early termination: stop if we've found enough paths
+    if (paths.length >= maxPaths) {
+      return false; // Stop searching
     }
 
     for (const node of nodes) {
@@ -932,24 +955,36 @@ export class DependencyTracker {
 
       if (exactMatch || nameMatch) {
         paths.push(newPath);
+        // Check if we've reached the limit
+        if (paths.length >= maxPaths) {
+          return false; // Stop searching
+        }
       }
 
       if (node.dependencies) {
         // Add nodeId to visited for this path branch
         visitedNodeIds.add(nodeId);
 
-        this.findAllPathsInTree(
+        const shouldContinue = this.findAllPathsInTree(
           node.dependencies,
           targetPackageId,
           newPath,
           visitedNodeIds,
           depth + 1,
           paths,
+          maxPaths,
         );
 
         // Remove after exploring this branch to allow node in other paths
         visitedNodeIds.delete(nodeId);
+
+        // Early termination: stop if child search says to stop
+        if (!shouldContinue) {
+          return false;
+        }
       }
     }
+
+    return true; // Continue searching
   }
 }

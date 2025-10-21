@@ -912,7 +912,7 @@ export class DuplicatesUsecase {
                   inst.id,
                 );
 
-                // Add allPaths
+                // Add allPaths (limited to 10 paths for performance)
                 const allPaths =
                   await this.dependencyTracker.getAllDependencyPaths(
                     project.importerPath,
