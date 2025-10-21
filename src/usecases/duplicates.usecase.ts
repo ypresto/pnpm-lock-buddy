@@ -117,7 +117,9 @@ export class DuplicatesUsecase {
 
   /**
    * Ensure all instances have complete dependency info
+   * NOTE: Currently unused but kept for potential future use with --deps optimization
    */
+  // @ts-expect-error - kept for reference but currently unused
   private async enrichInstancesWithDependencyInfo(
     duplicates: DuplicateInstance[],
   ): Promise<DuplicateInstance[]> {
@@ -462,20 +464,8 @@ export class DuplicatesUsecase {
               });
             }
 
-            // Generate dependency info for first project if requested
-            let dependencyInfo = undefined;
-            if (allImporters.length > 0) {
-              // Use first project as representative for dependency path
-              const firstProject = allImporters[0];
-              if (firstProject) {
-                dependencyInfo = await this.getInstanceDependencyInfo(
-                  firstProject,
-                  packageName,
-                  instance.id,
-                );
-              }
-            }
-
+            // Don't generate dependency info here - it's expensive (tree traversal)
+            // It will be computed lazily only when needed (e.g., for --deps flag)
             const result: any = {
               id: instance.id,
               version: instance.version,
@@ -484,7 +474,7 @@ export class DuplicatesUsecase {
                 ? allImporters
                 : Array.from(instance.projects),
               dependencyType: this.getDependencyType(packageName, allImporters),
-              dependencyInfo,
+              dependencyInfo: undefined, // Will be computed lazily if needed
             };
             return result;
           }),
@@ -608,9 +598,9 @@ export class DuplicatesUsecase {
     // Get global duplicates first (with same filtering)
     const globalDuplicates = await this.findDuplicates(options);
 
-    // Phase 1: Ensure all instances have complete dependency info
-    const enrichedDuplicates =
-      await this.enrichInstancesWithDependencyInfo(globalDuplicates);
+    // Phase 1: Skip enriching with dependency info - it's expensive and not needed unless --deps is used
+    // It will be computed lazily by enrichWithAllPaths() only when --deps is specified
+    const enrichedDuplicates = globalDuplicates; // Skip expensive enrichment
 
     // Phase 2: Group by importer
     const importerGroups = new Map<string, DuplicateInstance[]>();
@@ -710,6 +700,7 @@ export class DuplicatesUsecase {
               version: inst.version,
               dependencies: inst.dependencies,
               dependencyInfo: undefined as any, // Computed lazily by enrichWithAllPaths
+              dependencyType: inst.dependencyType, // Preserve for filtering
               hoisted: inst.hoisted,
             })),
           );
@@ -752,6 +743,7 @@ export class DuplicatesUsecase {
                           },
                         ],
                       },
+                      dependencyType: "hoisted",
                       hoisted: true,
                     });
                   }
@@ -780,8 +772,10 @@ export class DuplicatesUsecase {
               return true; // No omit filter, keep all instances
             }
 
+            // Use dependencyType instead of dependencyInfo.typeSummary to avoid computing expensive paths
+            const depType = inst.dependencyType || inst.dependencyInfo?.typeSummary || "transitive";
             return !this.shouldOmitDependencyType(
-              inst.dependencyInfo.typeSummary,
+              depType,
               options.omitTypes,
             );
           }),

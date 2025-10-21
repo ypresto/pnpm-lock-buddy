@@ -135,6 +135,7 @@ export class DependencyTracker {
         (sum, tree) => sum + tree.length,
         0,
       );
+
       if (totalNodes === 0) {
         this.buildTreesFromLockfile();
       } else {
