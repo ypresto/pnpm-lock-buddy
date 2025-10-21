@@ -94,7 +94,7 @@ export class DependencyTracker {
 
     this.initPromise = (async () => {
       await this.buildTreesFromPnpm();
-      this.buildDependencyMapFromTrees();
+      // Don't build dependency map yet - do it lazily when needed
       this.buildLinkedDependencies();
     })();
 
@@ -570,9 +570,13 @@ export class DependencyTracker {
   }
 
   /**
-   * Build dependency map from pnpm's trees
+   * Build dependency map from pnpm's trees (lazy - only when needed)
    */
   private buildDependencyMapFromTrees(): void {
+    if (this.dependencyMap.size > 0) {
+      return; // Already built
+    }
+
     this.dependencyMap = new Map();
 
     for (const [importerId, tree] of Object.entries(this.dependencyTrees)) {
@@ -660,6 +664,11 @@ export class DependencyTracker {
   async getImportersForPackage(packageId: string): Promise<string[]> {
     await this.initialize();
 
+    // Build dependency map lazily
+    if (this.dependencyMap.size === 0) {
+      this.buildDependencyMapFromTrees();
+    }
+
     // Check cache first
     if (this.importerCache.has(packageId)) {
       return this.importerCache.get(packageId)!;
@@ -683,6 +692,11 @@ export class DependencyTracker {
   async getDirectDependentsForPackage(packageId: string): Promise<string[]> {
     await this.initialize();
 
+    // Build dependency map lazily
+    if (this.dependencyMap.size === 0) {
+      this.buildDependencyMapFromTrees();
+    }
+
     const depInfo = this.dependencyMap.get(packageId);
     if (!depInfo) {
       return [];
@@ -696,6 +710,11 @@ export class DependencyTracker {
    */
   async isPackageUsed(packageId: string): Promise<boolean> {
     await this.initialize();
+
+    // Build dependency map lazily
+    if (this.dependencyMap.size === 0) {
+      this.buildDependencyMapFromTrees();
+    }
 
     const depInfo = this.dependencyMap.get(packageId);
     return depInfo ? depInfo.importers.size > 0 : false;

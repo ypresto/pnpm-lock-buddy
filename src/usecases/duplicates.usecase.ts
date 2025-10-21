@@ -612,7 +612,7 @@ export class DuplicatesUsecase {
     const enrichedDuplicates =
       await this.enrichInstancesWithDependencyInfo(globalDuplicates);
 
-    // Phase 2: Group by importer with robust file variant detection
+    // Phase 2: Group by importer
     const importerGroups = new Map<string, DuplicateInstance[]>();
 
     for (const duplicate of enrichedDuplicates) {
