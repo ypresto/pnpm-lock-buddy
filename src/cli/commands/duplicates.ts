@@ -195,8 +195,13 @@ export function createDuplicatesCommand(): Command {
               );
             }
 
+            // Only compute allPaths if showing dependency trees (expensive with circular deps)
+            const enrichedDuplicates = showDependencyTree
+              ? await duplicatesUsecase.enrichWithAllPaths(perProjectDuplicates)
+              : perProjectDuplicates;
+
             const output = duplicatesUsecase.formatPerProjectResults(
-              perProjectDuplicates,
+              enrichedDuplicates,
               options.output as OutputFormat,
               showDependencyTree,
               compactTreeDepth,

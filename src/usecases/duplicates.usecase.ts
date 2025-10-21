@@ -709,14 +709,8 @@ export class DuplicatesUsecase {
               id: inst.id,
               version: inst.version,
               dependencies: inst.dependencies,
-              dependencyInfo:
-                inst.dependencyInfo ||
-                (await this.getInstanceDependencyInfo(
-                  importerPath,
-                  packageName,
-                  inst.id,
-                )),
-              hoisted: inst.hoisted, // Preserve hoisted flag from global duplicates
+              dependencyInfo: undefined as any, // Computed lazily by enrichWithAllPaths
+              hoisted: inst.hoisted,
             })),
           );
 
@@ -871,12 +865,6 @@ export class DuplicatesUsecase {
       instanceId,
     );
 
-    // Get all paths - now safe with circular detection
-    const allPaths = await this.dependencyTracker.getAllDependencyPaths(
-      importerPath,
-      instanceId,
-    );
-
     const typeSummary =
       path.length > 0 ? this.getTypeSummaryFromPath(path) : "transitive";
 
@@ -885,10 +873,12 @@ export class DuplicatesUsecase {
         ? path
         : [{ package: instanceId, type: "transitive", specifier: "unknown" }];
 
+    // Don't compute allPaths here - too expensive
+    // It will be computed lazily when needed for formatting with --deps
     return {
       typeSummary,
       path: finalPath,
-      allPaths: allPaths.length > 1 ? allPaths : undefined,
+      allPaths: undefined,
     };
   }
 
@@ -904,6 +894,50 @@ export class DuplicatesUsecase {
     if (types.has("peerDependencies")) return "peerDependencies";
     if (types.has("devDependencies")) return "devDependencies";
     return "transitive";
+  }
+
+  /**
+   * Enrich per-project duplicates with dependency info for tree display
+   * Only call this when actually showing dependency trees (--deps flag)
+   */
+  async enrichWithAllPaths(
+    perProjectDuplicates: PerProjectDuplicate[],
+  ): Promise<PerProjectDuplicate[]> {
+    return await Promise.all(
+      perProjectDuplicates.map(async (project) => ({
+        ...project,
+        duplicatePackages: await Promise.all(
+          project.duplicatePackages.map(async (pkg) => ({
+            ...pkg,
+            instances: await Promise.all(
+              pkg.instances.map(async (inst) => {
+                // Compute full dependency info (path + allPaths) for this project
+                const dependencyInfo = await this.getInstanceDependencyInfo(
+                  project.importerPath,
+                  pkg.packageName,
+                  inst.id,
+                );
+
+                // Add allPaths
+                const allPaths =
+                  await this.dependencyTracker.getAllDependencyPaths(
+                    project.importerPath,
+                    inst.id,
+                  );
+
+                return {
+                  ...inst,
+                  dependencyInfo: {
+                    ...dependencyInfo,
+                    allPaths: allPaths.length > 1 ? allPaths : undefined,
+                  },
+                };
+              }),
+            ),
+          })),
+        ),
+      })),
+    );
   }
 
   /**
