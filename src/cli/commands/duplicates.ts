@@ -224,7 +224,7 @@ export function createDuplicatesCommand(): Command {
             ),
           );
 
-          const duplicates = await duplicatesUsecase.findDuplicates({
+          let duplicates = await duplicatesUsecase.findDuplicates({
             showAll: options.all,
             packageFilter: packageNames.length > 0 ? packageNames : undefined,
             projectFilter: options.project,
@@ -254,8 +254,15 @@ export function createDuplicatesCommand(): Command {
               );
             }
 
+            // Enrich with dependency info if showing dependency tree
+            const enrichedDuplicates = showDependencyTree
+              ? await duplicatesUsecase.enrichGlobalDuplicatesWithDependencyInfo(
+                  duplicates,
+                )
+              : duplicates;
+
             const output = duplicatesUsecase.formatResults(
-              duplicates,
+              enrichedDuplicates,
               options.output as OutputFormat,
               showDependencyTree,
               compactTreeDepth,

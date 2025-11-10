@@ -773,11 +773,11 @@ export class DuplicatesUsecase {
             }
 
             // Use dependencyType instead of dependencyInfo.typeSummary to avoid computing expensive paths
-            const depType = inst.dependencyType || inst.dependencyInfo?.typeSummary || "transitive";
-            return !this.shouldOmitDependencyType(
-              depType,
-              options.omitTypes,
-            );
+            const depType =
+              inst.dependencyType ||
+              inst.dependencyInfo?.typeSummary ||
+              "transitive";
+            return !this.shouldOmitDependencyType(depType, options.omitTypes);
           }),
         }))
         .filter((pkg) => pkg.instances.length > 0) // Remove packages with no instances after filtering
@@ -929,6 +929,51 @@ export class DuplicatesUsecase {
               }),
             ),
           })),
+        ),
+      })),
+    );
+  }
+
+  /**
+   * Enrich global duplicates with dependency info for tree display
+   * Only call this when actually showing dependency trees (--deps flag)
+   * For global mode, we compute dependency info from the first project for each instance
+   */
+  async enrichGlobalDuplicatesWithDependencyInfo(
+    duplicates: DuplicateInstance[],
+  ): Promise<DuplicateInstance[]> {
+    return await Promise.all(
+      duplicates.map(async (duplicate) => ({
+        ...duplicate,
+        instances: await Promise.all(
+          duplicate.instances.map(async (instance) => {
+            // Skip if no projects (shouldn't happen, but be safe)
+            if (instance.projects.length === 0) {
+              return instance;
+            }
+
+            // Get dependency info from the first project
+            const firstProject = instance.projects[0]!; // Safe because we checked length > 0
+            const dependencyInfo = await this.getInstanceDependencyInfo(
+              firstProject,
+              duplicate.packageName,
+              instance.id,
+            );
+
+            // Get all paths for this instance
+            const allPaths = await this.dependencyTracker.getAllDependencyPaths(
+              firstProject,
+              instance.id,
+            );
+
+            return {
+              ...instance,
+              dependencyInfo: {
+                ...dependencyInfo,
+                allPaths: allPaths.length > 1 ? allPaths : undefined,
+              },
+            };
+          }),
         ),
       })),
     );

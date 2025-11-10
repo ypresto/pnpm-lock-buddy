@@ -1,6 +1,5 @@
 import type { PnpmLockfile } from "./lockfile.js";
 import { loadLockfile } from "./lockfile.js";
-import { parsePackageString } from "./parser.js";
 import type {
   DependencyPathStep,
   LinkedDependencyInfo,
@@ -834,11 +833,12 @@ export class DependencyTracker {
 
       const newPath = [...currentPath, step];
 
-      const nameMatch = node.name === parsePackageString(targetPackageId).name;
+      // Only match exact version, not just package name
+      // This prevents matching react@19.1.1 when searching for react@18.2.0
       const exactMatch =
         nodeId === targetPackageId || nodeId.startsWith(targetPackageId);
 
-      if (exactMatch || nameMatch) {
+      if (exactMatch) {
         return newPath;
       }
 
@@ -949,11 +949,12 @@ export class DependencyTracker {
 
       const newPath = [...currentPath, step];
 
-      const nameMatch = node.name === parsePackageString(targetPackageId).name;
+      // Only match exact version, not just package name
+      // This prevents matching react@19.1.1 when searching for react@18.2.0
       const exactMatch =
         nodeId === targetPackageId || nodeId.startsWith(targetPackageId);
 
-      if (exactMatch || nameMatch) {
+      if (exactMatch) {
         paths.push(newPath);
         // Check if we've reached the limit
         if (paths.length >= maxPaths) {
