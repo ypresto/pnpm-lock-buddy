@@ -157,7 +157,7 @@ export class DependencyTracker {
     // Use a global visited set to prevent infinite recursion across all trees
     const globalVisited = new Set<string>();
 
-    for (const nodes of Object.values(this.dependencyTrees)) {
+    for (const [, nodes] of Object.entries(this.dependencyTrees)) {
       this.enrichNodesWithLinkedDeps(nodes, lockfile, globalVisited);
     }
   }
@@ -223,14 +223,47 @@ export class DependencyTracker {
                   lockfile.importers?.[resolvedImporter] &&
                   !visitedImporters.has(resolvedImporter)
                 ) {
-                  // Always use standalone importer for links to detect runtime conflicts
-                  // Even if a contextualized snapshot exists, the filesystem link resolves
-                  // to the standalone workspace directory
-                  const linkDeps = this.buildLinkedDependencyNodes(
-                    resolvedImporter,
-                    lockfile,
-                    visitedImporters,
-                  );
+                  // For @file: packages, try to find the contextualized snapshot first
+                  // to get the correct peer dependency resolutions
+                  let linkDeps: PackageNode[] | undefined;
+
+                  // Look for a contextualized @file: version in the parent's snapshot dependencies
+                  const parentSnapshotKey = `${node.name}@${node.version}`;
+                  const parentSnapshot =
+                    lockfile.snapshots?.[parentSnapshotKey];
+
+                  if (parentSnapshot) {
+                    const allParentDeps = {
+                      ...parentSnapshot.dependencies,
+                      ...parentSnapshot.optionalDependencies,
+                    };
+
+                    // Find the actual resolved version for this link
+                    const resolvedVersion = allParentDeps[depName];
+
+                    if (
+                      resolvedVersion &&
+                      typeof resolvedVersion === "string"
+                    ) {
+                      // Use the contextualized version from the parent snapshot
+                      linkDeps = this.buildTransitiveDepsFromLockfile(
+                        depName,
+                        resolvedVersion,
+                        lockfile,
+                        new Set(),
+                        visitedImporters,
+                      );
+                    }
+                  }
+
+                  // Fallback to standalone importer if contextualized version not found
+                  if (!linkDeps) {
+                    linkDeps = this.buildLinkedDependencyNodes(
+                      resolvedImporter,
+                      lockfile,
+                      visitedImporters,
+                    );
+                  }
 
                   if (existingChild) {
                     // Enrich existing node
