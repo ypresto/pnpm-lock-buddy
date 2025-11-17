@@ -1,7 +1,31 @@
 {
   "name": "pnpm-lock-buddy",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "CLI tool for analyzing pnpm-lock.yaml files",
+  "author": "ypresto <yuya.presto@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ypresto/pnpm-lock-buddy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ypresto/pnpm-lock-buddy/issues"
+  },
+  "homepage": "https://github.com/ypresto/pnpm-lock-buddy",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "keywords": [
+    "pnpm",
+    "lockfile",
+    "dependencies",
+    "analysis",
+    "cli"
+  ],
+  "packageManager": "pnpm@9.9.0+sha512.60c18acd138bff695d339be6ad13f7e936eea6745660d4cc4a776d5247c540d0edee1a563695c183a66eb917ef88f2b4feb1fc25f32a7adcadc7aaf3438e99c1",
+  "files": [
+    "dist"
+  ],
   "main": "dist/cli/index.js",
   "type": "module",
   "bin": {
@@ -39,18 +63,5 @@
     "prettier": "^3.1.1",
     "typescript": "^5.3.3",
     "vitest": "^1.0.4"
-  },
-  "engines": {
-    "node": ">=14.0.0"
-  },
-  "keywords": [
-    "pnpm",
-    "lockfile",
-    "dependencies",
-    "analysis",
-    "cli"
-  ],
-  "author": "",
-  "license": "MIT",
-  "packageManager": "pnpm@9.9.0+sha512.60c18acd138bff695d339be6ad13f7e936eea6745660d4cc4a776d5247c540d0edee1a563695c183a66eb917ef88f2b4feb1fc25f32a7adcadc7aaf3438e99c1"
+  }
 }
