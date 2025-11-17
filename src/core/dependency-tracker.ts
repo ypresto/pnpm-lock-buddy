@@ -8,7 +8,6 @@ import type {
 import { buildDependenciesHierarchy } from "@pnpm/reviewing.dependencies-hierarchy";
 import type { PackageNode } from "@pnpm/reviewing.dependencies-hierarchy";
 import path from "path";
-import fs from "fs";
 
 /**
  * Tracks transitive dependencies and provides lookup functionality
@@ -24,7 +23,6 @@ export class DependencyTracker {
   private importerCache = new Map<string, string[]>(); // packageId -> importers (cached)
   private linkedDependencies = new Map<string, LinkedDependencyInfo[]>(); // importer -> linked deps
   private allPathsCache = new Map<string, DependencyPathStep[][]>(); // (importerPath, packageId) -> paths (cached)
-  private peerOnlyDeps = new Map<string, Set<string>>(); // importerPath -> peer-only package names
   private initPromise: Promise<void> | null = null;
 
   constructor(lockfilePath: string, depth: number = 10) {
@@ -123,44 +121,6 @@ export class DependencyTracker {
             ? "."
             : path.relative(this.lockfileDir, projectDir);
 
-        // Get peer-only dependencies from package.json for later path filtering
-        // We need to check package.json because lockfile includes auto-installed peers in dependencies
-        const peerDepsOnly = new Set<string>();
-        try {
-          const packageJsonPath = path.join(
-            this.lockfileDir,
-            importerId,
-            "package.json",
-          );
-          const packageJson = JSON.parse(
-            fs.readFileSync(packageJsonPath, "utf-8"),
-          );
-
-          const regularDeps = new Set([
-            ...Object.keys(packageJson.dependencies || {}),
-            ...Object.keys(packageJson.devDependencies || {}),
-            ...Object.keys(packageJson.optionalDependencies || {}),
-          ]);
-
-          const peerDeps = Object.keys(packageJson.peerDependencies || {});
-
-          // Identify packages that are ONLY peer dependencies (not also regular deps)
-          peerDeps.forEach((name) => {
-            if (!regularDeps.has(name)) {
-              peerDepsOnly.add(name);
-            }
-          });
-        } catch (e) {
-          // If package.json doesn't exist, no peer-only deps to track
-        }
-
-        // Store peer-only deps for this importer (used later for path filtering)
-        if (peerDepsOnly.size > 0) {
-          this.peerOnlyDeps.set(importerId, peerDepsOnly);
-        }
-
-        // Keep all dependencies in the tree (don't filter)
-        // We need them to find paths, but we'll filter single-step paths later
         const allNodes: PackageNode[] = [
           ...(hierarchy.dependencies || []),
           ...(hierarchy.devDependencies || []),
@@ -968,28 +928,10 @@ export class DependencyTracker {
     const paths: DependencyPathStep[][] = [];
     this.findAllPathsInTree(tree, packageId, [], new Set(), 0, paths, maxPaths);
 
-    // Filter out single-step paths to peer-only dependencies
-    // These represent auto-installed peer deps that shouldn't appear as direct dependencies
-    const peerOnlyDeps = this.peerOnlyDeps.get(importerPath);
-    let filteredPaths = paths;
-
-    if (peerOnlyDeps && paths.length > 0) {
-      // Extract package name from packageId (e.g., "react-dom@18.2.0" -> "react-dom")
-      const packageName = packageId.substring(0, packageId.lastIndexOf("@"));
-
-      // If this package is peer-only and has both single and multi-step paths, filter single-step
-      if (peerOnlyDeps.has(packageName)) {
-        const hasMultiStepPaths = paths.some((path) => path.length > 1);
-        if (hasMultiStepPaths) {
-          filteredPaths = paths.filter((path) => path.length > 1);
-        }
-      }
-    }
-
     // Cache the result
-    this.allPathsCache.set(cacheKey, filteredPaths);
+    this.allPathsCache.set(cacheKey, paths);
 
-    return filteredPaths;
+    return paths;
   }
 
   /**
