@@ -108,30 +108,43 @@ pnpm-lock-buddy list express --output list
 ### List Output
 
 ```text
-importers
-  apps/web-app
-    dependencies
-      => react
-         specifier: ^18.2.0
-         version: 18.2.0(@types/react@18.2.0)(react-dom@18.2.0) [1]
+react
+  react@18.2.0
+    => importers > apps/web-app > dependencies > react
+       specifier: ^18.2.0
+  react@18.2.0
+    => packages > react@18.2.0
+       specifier: react@18.2.0
+  react@18.2.0
+    => snapshots > react-dom@18.2.0(react@18.2.0) > dependencies > react
 ```
 
-- **Green text**: Base version (18.2.0)
-- **Magenta text**: Peer dependency constraints (@types/react@18.2.0)(react-dom@18.2.0)
-- **[1]**: Version suffix when multiple peer dependency combinations exist
-  - It is [NPM doppelgangers](https://pnpm.io/settings#dedupepeerdependents) which happens when there is [peer dependency conflict](https://pnpm.io/settings#dedupepeerdependents).
+- Shows all locations where a package appears in the lockfile
+- **specifier**: The version constraint or exact version
+- **Peer dependencies**: Shown in parentheses (e.g., `(react@18.2.0)`)
+- Multiple entries indicate different resolution contexts (importers, packages, snapshots)
 
 ### Duplicates Output
 
+**Global mode** (default):
 ```text
 react has 2 instances:
-  react@18.2.0 (dependencies)
+  react@18.2.0 [1] (dependencies)
     Used by: apps/web-app, packages/ui-lib
-  react@19.1.1 (devDependencies)
-    Used by: apps/experimental
+  react@19.1.1 [2] (dependencies)
+    Used by: apps/experimental, packages/webapp/ui-react
 ```
 
-- **(dependencies)**: Dependency type
+**Per-project mode** (`--per-project`):
+```text
+react:
+  apps/attendance-webapp: has 2 instances
+    ├─── react@18.2.0 [1]
+    └─── react@19.1.1 [2]
+```
+
+- **[1], [2]**: Instance identifiers for distinguishing different versions/resolutions
+- **(dependencies)**: Dependency type (d=dependencies, D=devDependencies, o=optional, p=peer)
 - **Used by**: Projects that use this instance (includes transitive dependencies)
 
 ## CI/CD Integration
@@ -182,8 +195,8 @@ node dist/cli/index.js duplicates --per-project "@layerone/bakuraku-fetch"
 ```
 @layerone/bakuraku-fetch:
   apps/payer-nextjs-webapp: has 2 instances
-    @layerone/bakuraku-fetch@file:packages/webapp/bakuraku-fetch(react@18.2.0)  ← Via snapshots
-    @layerone/bakuraku-fetch@link:../../packages/webapp/bakuraku-fetch           ← Via importers
+    ├─── @layerone/bakuraku-fetch@file:packages/webapp/bakuraku-fetch(react@18.2.0) [1]
+    └─── @layerone/bakuraku-fetch@link:../../packages/webapp/bakuraku-fetch [2]
 ```
 
 **Solution:** Remove redundant direct links where packages are already transitively available.
@@ -201,13 +214,12 @@ node dist/cli/index.js duplicates --per-project --deps @typescript-eslint/types
 ```
 @typescript-eslint/types:
   packages/shared/eslint-config: has 2 instances
-    packages/shared/eslint-config
-    ├─(D)─ eslint-plugin-storybook@9.0.7(...)
-    │  │  │  └─(d)─ @typescript-eslint/types@8.38.0  ← v8.38.0 via storybook
-
-    packages/shared/eslint-config
-    ├─(D)─ eslint-plugin-import@2.32.0(...)
-    │  │  │  └─(d)─ @typescript-eslint/types@8.39.0  ← v8.39.0 via import
+    ├─── eslint-plugin-storybook@9.0.7(...)
+    │  └─── @storybook/eslint-plugin@7.5.0
+    │     └─── @typescript-eslint/types@8.38.0 [1]
+    └─── eslint-plugin-import@2.32.0(...)
+       └─── @typescript-eslint/parser@8.39.0
+          └─── @typescript-eslint/types@8.39.0 [2]
 ```
 
 **Solution:** Update `eslint-plugin-storybook` to align with `eslint-plugin-import` version.
@@ -225,8 +237,8 @@ node dist/cli/index.js duplicates --per-project --omit=dev --omit=optional
 ```
 react:
   apps/web: has 2 instances
-    react@18.2.0 (d)
-    react@19.1.1 (d)  ← Critical production conflict!
+    ├─── react@18.2.0 [1]
+    └─── react@19.1.1 [2]  ← Critical production conflict!
 ```
 
 ### 🔎 Find Packages by Pattern
