@@ -262,12 +262,13 @@ function formatDependencyTree(
 
       let prefix = "";
       if (i === 0) {
-        prefix =
-          i === path.length - 1 ? `${basePrefix}    └─` : `${basePrefix}    ├─`;
+        // For single-path, always use └─ since there's only one path
+        prefix = `${basePrefix}    └─`;
       } else {
-        const isLast = i === path.length - 1;
-        const parentSpacing = `${basePrefix}    ` + "│  ".repeat(i);
-        prefix = isLast ? `${parentSpacing}└─` : `${parentSpacing}├─`;
+        // For single-path, use spaces instead of │ since each node has only one child
+        const parentSpacing = `${basePrefix}    ` + "   ".repeat(i);
+        // Always use └─ for single-path mode
+        prefix = `${parentSpacing}└─`;
       }
 
       const typeLabel = typeCode ? `(${typeCode})` : "";
