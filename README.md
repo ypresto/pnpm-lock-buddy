@@ -5,7 +5,7 @@ A powerful tool for analyzing dependency duplicates and workspace conflicts in p
 ## Why This Tool?
 
 Large monorepos often suffer from:
-- 🚨 **Runtime module conflicts** from the same package loaded multiple ways  
+- 🚨 **Runtime module conflicts** from the same package loaded multiple ways
 - 📦 **Bundle bloat** from duplicate packages with different versions
 - 🔗 **Workspace link issues** causing `link:` vs `file:` resolution conflicts
 - 🤔 **Complex dependency chains** that are hard to trace
@@ -20,34 +20,6 @@ pnpm install -g pnpm-lock-buddy
 ```
 
 ## Commands
-
-### `pnpm-lock-buddy list` - Search for packages
-
-Search for specific packages or list all packages in the lockfile.
-
-```bash
-# Search for a specific package
-pnpm-lock-buddy list express
-pnpm-lock-buddy list express@4.18.2
-pnpm-lock-buddy list @types/react
-
-# List all packages
-pnpm-lock-buddy list
-
-# Filter by project
-pnpm-lock-buddy list react --project "apps/web" "packages/ui"
-
-# Output formats
-pnpm-lock-buddy list express --output json
-pnpm-lock-buddy list express --output list
-```
-
-**Options:**
-
-- `-f, --file <path>` - Path to pnpm-lock.yaml file
-- `-e, --exact` - Only match exact versions listed in lockfile (semver range specifier not matches with this)
-- `-p, --project <projects...>` - Filter by specific importer/project paths
-- `-o, --output <format>` - Output format: tree, json, list (default: tree)
 
 ### `pnpm-lock-buddy duplicates` - Find duplicate packages
 
@@ -98,6 +70,34 @@ pnpm-lock-buddy duplicates react lodash --exit-code
 - `--omit <types...>` - Omit dependency types: dev, optional, peer (e.g., `--omit dev --omit optional`)
 - `--exit-code` - Exit with code 1 if duplicate packages are found (useful for CI/CD)
 - `-o, --output <format>` - Output format: tree, json (default: tree)
+
+### `pnpm-lock-buddy list` - Search for packages
+
+Search for specific packages or list all packages in the lockfile.
+
+```bash
+# Search for a specific package
+pnpm-lock-buddy list express
+pnpm-lock-buddy list express@4.18.2
+pnpm-lock-buddy list @types/react
+
+# List all packages
+pnpm-lock-buddy list
+
+# Filter by project
+pnpm-lock-buddy list react --project "apps/web" "packages/ui"
+
+# Output formats
+pnpm-lock-buddy list express --output json
+pnpm-lock-buddy list express --output list
+```
+
+**Options:**
+
+- `-f, --file <path>` - Path to pnpm-lock.yaml file
+- `-e, --exact` - Only match exact versions listed in lockfile (semver range specifier not matches with this)
+- `-p, --project <projects...>` - Filter by specific importer/project paths
+- `-o, --output <format>` - Output format: tree, json, list (default: tree)
 
 ## Environment Variables
 
@@ -193,7 +193,7 @@ node dist/cli/index.js duplicates --per-project "@layerone/bakuraku-fetch"
 **Problem:** Different ESLint plugins bringing conflicting TypeScript ESLint versions.
 
 ```bash
-# Trace dependency chains  
+# Trace dependency chains
 node dist/cli/index.js duplicates --per-project --deps @typescript-eslint/types
 ```
 
@@ -204,8 +204,8 @@ node dist/cli/index.js duplicates --per-project --deps @typescript-eslint/types
     packages/shared/eslint-config
     ├─(D)─ eslint-plugin-storybook@9.0.7(...)
     │  │  │  └─(d)─ @typescript-eslint/types@8.38.0  ← v8.38.0 via storybook
-    
-    packages/shared/eslint-config  
+
+    packages/shared/eslint-config
     ├─(D)─ eslint-plugin-import@2.32.0(...)
     │  │  │  └─(d)─ @typescript-eslint/types@8.39.0  ← v8.39.0 via import
 ```
@@ -224,7 +224,7 @@ node dist/cli/index.js duplicates --per-project --omit=dev --omit=optional
 **Output:**
 ```
 react:
-  apps/web: has 2 instances  
+  apps/web: has 2 instances
     react@18.2.0 (d)
     react@19.1.1 (d)  ← Critical production conflict!
 ```
@@ -236,7 +236,7 @@ react:
 ```bash
 # Wildcard patterns
 node dist/cli/index.js duplicates --per-project "react*"      # All React packages
-node dist/cli/index.js duplicates --per-project "@types/*"   # All TypeScript types  
+node dist/cli/index.js duplicates --per-project "@types/*"   # All TypeScript types
 node dist/cli/index.js duplicates --per-project "*eslint*"   # All ESLint packages
 ```
 
