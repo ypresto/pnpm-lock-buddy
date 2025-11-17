@@ -1,4 +1,4 @@
-# pnpm-lock-search
+# pnpm-lock-buddy
 
 A powerful tool for analyzing dependency duplicates and workspace conflicts in pnpm-lock.yaml files. Designed for large monorepos to detect critical runtime issues and bundle bloat.
 
