@@ -415,7 +415,20 @@ export class DependencyTracker {
             lockfile,
             new Set(visitedImporters),
           );
-          nodes.push(...nestedNodes);
+
+          // Create a link node that preserves the intermediate package in the tree
+          const linkNode: PackageNode = {
+            alias: depName,
+            name: depName,
+            version: version,
+            path: `node_modules/${depName}`,
+            isPeer: false,
+            isSkipped: false,
+            isMissing: false,
+            dependencies: nestedNodes.length > 0 ? nestedNodes : undefined,
+          };
+
+          nodes.push(linkNode);
         }
         continue;
       }
@@ -489,6 +502,7 @@ export class DependencyTracker {
 
         if (resolvedImporter && lockfile.importers?.[resolvedImporter]) {
           // Use standalone importer to track dependencies from linked workspace package
+          // This creates a proper node for the linked package instead of flattening it
           const linkedDeps =
             !visitedImporters || !visitedImporters.has(resolvedImporter)
               ? this.buildLinkedDependencyNodes(
