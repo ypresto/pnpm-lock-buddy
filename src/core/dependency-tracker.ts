@@ -266,11 +266,30 @@ export class DependencyTracker {
                   }
 
                   if (existingChild) {
-                    // Enrich existing node
+                    // Enrich existing node with dependencies and dev/optional flags
+                    const importerData = sourceImporter
+                      ? lockfile.importers?.[sourceImporter]
+                      : undefined;
+                    const isDev = !!importerData?.devDependencies?.[depName];
+                    const isOptional = !!importerData?.optionalDependencies?.[depName];
+
                     existingChild.dependencies =
                       linkDeps.length > 0 ? linkDeps : undefined;
+                    if (isDev) {
+                      existingChild.dev = true;
+                    }
+                    if (isOptional) {
+                      existingChild.optional = true;
+                    }
                   } else {
                     // Create new link node
+                    // Check if this link is a dev or optional dependency
+                    const importerData = sourceImporter
+                      ? lockfile.importers?.[sourceImporter]
+                      : undefined;
+                    const isDev = !!importerData?.devDependencies?.[depName];
+                    const isOptional = !!importerData?.optionalDependencies?.[depName];
+
                     const linkNode: PackageNode = {
                       alias: depName,
                       name: depName,
@@ -279,6 +298,8 @@ export class DependencyTracker {
                       isPeer: false,
                       isSkipped: false,
                       isMissing: false,
+                      ...(isDev && { dev: true }),
+                      ...(isOptional && { optional: true }),
                       dependencies: linkDeps.length > 0 ? linkDeps : undefined,
                     };
 
