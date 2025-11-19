@@ -481,6 +481,86 @@ describe("DependencyTracker", () => {
       const linkedDeps = await tracker.getLinkedDependencies(".");
       expect(linkedDeps).toEqual([]);
     });
+
+    it("should preserve intermediate linked dependencies in tree structure", async () => {
+      // Test for issue where intermediate linked packages were flattened
+      // Scenario: constants -> eslint-config -> eslint-plugin-storybook
+      // The tree should show all three levels, not skip the intermediate eslint-config
+      const intermediateLinkedLockfile: PnpmLockfile = {
+        lockfileVersion: "9.0",
+        importers: {
+          ".": {
+            dependencies: {
+              "@my/constants": {
+                specifier: "link:packages/shared/constants",
+                version: "link:packages/shared/constants",
+              },
+            },
+          },
+          "packages/shared/constants": {
+            devDependencies: {
+              "@my/eslint-config": {
+                specifier: "link:../eslint-config",
+                version: "link:../eslint-config",
+              },
+            },
+          },
+          "packages/shared/eslint-config": {
+            devDependencies: {
+              "eslint-plugin-storybook": {
+                specifier: "9.1.12",
+                version: "9.1.12",
+              },
+            },
+          },
+        },
+        packages: {
+          "eslint-plugin-storybook@9.1.12": {
+            resolution: { integrity: "sha512-eslintplugin" },
+          },
+        },
+        snapshots: {
+          "eslint-plugin-storybook@9.1.12": {},
+        },
+      };
+
+      const lockfilePath = writeMockLockfile(intermediateLinkedLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
+
+      // Verify that eslint-plugin-storybook is accessible from root
+      const storybookImporters =
+        await tracker.getImportersForPackage("eslint-plugin-storybook@9.1.12");
+      expect(storybookImporters).toContain(".");
+      expect(storybookImporters).toContain("packages/shared/constants");
+      expect(storybookImporters).toContain("packages/shared/eslint-config");
+
+      // Verify the dependency tree structure preserves intermediate links
+      // Check from packages/shared/constants since it directly has eslint-config as a dev dependency
+      const trees = await tracker.getDependencyTrees();
+      const constantsTree = trees["packages/shared/constants"];
+      expect(constantsTree).toBeDefined();
+
+      // Find eslint-config node in constants tree
+      const eslintConfigNode = constantsTree?.find(
+        (node) => node.name === "@my/eslint-config",
+      );
+      expect(eslintConfigNode).toBeDefined();
+      expect(eslintConfigNode?.version).toBe("link:../eslint-config");
+
+      // eslint-config should have eslint-plugin-storybook as a child (preserved, not flattened)
+      const storybookNode = eslintConfigNode?.dependencies?.find(
+        (node) => node.name === "eslint-plugin-storybook",
+      );
+      expect(storybookNode).toBeDefined();
+      expect(storybookNode?.version).toBe("9.1.12");
+
+      // Verify storybook is not directly under constants but under eslint-config
+      // (this would have failed before the fix)
+      const storybookDirectChild = constantsTree?.find(
+        (node) => node.name === "eslint-plugin-storybook",
+      );
+      expect(storybookDirectChild).toBeUndefined(); // Should NOT be a direct child
+    });
   });
 
   describe("tree-based dependency resolution", () => {

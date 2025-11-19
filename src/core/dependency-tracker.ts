@@ -346,7 +346,20 @@ export class DependencyTracker {
               lockfile,
               new Set([importerId]),
             );
-            nodes.push(...linkedNodes);
+
+            // Create a link node that preserves the intermediate package in the tree
+            const linkNode: PackageNode = {
+              alias: depName,
+              name: depName,
+              version: version,
+              path: `node_modules/${depName}`,
+              isPeer: false,
+              isSkipped: false,
+              isMissing: false,
+              dependencies: linkedNodes.length > 0 ? linkedNodes : undefined,
+            };
+
+            nodes.push(linkNode);
           }
           continue;
         }
