@@ -356,6 +356,8 @@ export class DependencyTracker {
               isPeer: false,
               isSkipped: false,
               isMissing: false,
+              ...(isDev && { dev: true }),
+              ...(isOptional && { optional: true }),
               dependencies: linkedNodes.length > 0 ? linkedNodes : undefined,
             };
 
@@ -418,6 +420,8 @@ export class DependencyTracker {
 
     for (const [depName, depInfo] of Object.entries(allDeps || {})) {
       const version = depInfo.version;
+      const isDev = !!importerData.devDependencies?.[depName];
+      const isOptional = !!importerData.optionalDependencies?.[depName];
 
       // Recursively handle nested linked dependencies
       if (version.startsWith("link:")) {
@@ -438,6 +442,8 @@ export class DependencyTracker {
             isPeer: false,
             isSkipped: false,
             isMissing: false,
+            ...(isDev && { dev: true }),
+            ...(isOptional && { optional: true }),
             dependencies: nestedNodes.length > 0 ? nestedNodes : undefined,
           };
 
@@ -463,6 +469,8 @@ export class DependencyTracker {
         isPeer: false,
         isSkipped: false,
         isMissing: false,
+        ...(isDev && { dev: true }),
+        ...(isOptional && { optional: true }),
         dependencies: transitiveDeps,
       };
 
