@@ -20,9 +20,16 @@ export function createListCommand(): Command {
       "-p, --project <projects...>",
       'Filter by specific importer/project paths (e.g., "apps/web" "packages/ui")',
     )
+    .option(
+      "--ignore-dev",
+      'Shorthand for --omit=dev (ignore development dependencies)',
+    )
     .option("-o, --output <format>", "Output format: tree, json, list", "tree")
     .action((packageName: string | undefined, options) => {
       try {
+        // Handle --ignore-dev flag as shorthand for omitting dev dependencies
+        const omitTypes = options.ignoreDev ? ["devDependencies"] : undefined;
+
         // Load lockfile
         const lockfile = loadLockfile(options.file);
 
@@ -55,6 +62,7 @@ export function createListCommand(): Command {
           results = listUsecase.search(packageName, {
             exactMatch: options.exact,
             projectFilter: options.project,
+            omitTypes: omitTypes,
           });
         } else {
           // List all packages
@@ -69,6 +77,7 @@ export function createListCommand(): Command {
 
           results = listUsecase.listAll({
             projectFilter: options.project,
+            omitTypes: omitTypes,
           });
         }
 

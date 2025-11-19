@@ -13,6 +13,7 @@ import {
 export interface ListOptions {
   exactMatch?: boolean;
   projectFilter?: string[];
+  omitTypes?: string[];
 }
 
 export type OutputFormat = "tree" | "json" | "list";
@@ -29,7 +30,7 @@ export class ListUsecase {
     // Parse the search term
     const { name: targetPackage, version: targetVersion } =
       parsePackageString(searchTerm);
-    const { exactMatch = false, projectFilter } = options;
+    const { exactMatch = false, projectFilter, omitTypes = [] } = options;
 
     // Traverse the lockfile
     traverseLockfile(this.lockfile, (context) => {
@@ -66,6 +67,19 @@ export class ListUsecase {
             !targetVersion ||
             matchesVersion(targetVersion, depInfo.specifier, exactMatch)
           ) {
+            // Determine dependency type
+            const typeMap: Record<string, string> = {
+              dependencies: "dependency",
+              devDependencies: "devDependency",
+              optionalDependencies: "optionalDependency",
+            };
+            const resultType = typeMap[depType];
+
+            // Skip if this type should be omitted
+            if (omitTypes.includes(depType)) {
+              return;
+            }
+
             // Use the full version string which includes peer dependency constraints
             const fullVersion = depInfo.version;
 
@@ -73,12 +87,10 @@ export class ListUsecase {
               packageName: targetPackage,
               version: fullVersion || null,
               path: path,
-              type:
-                depType === "devDependencies"
-                  ? "devDependency"
-                  : depType === "optionalDependencies"
-                    ? "optionalDependency"
-                    : "dependency",
+              type: resultType as
+                | "dependency"
+                | "devDependency"
+                | "optionalDependency",
               parent: path[1],
               specifier: depInfo.specifier,
             });
@@ -163,9 +175,9 @@ export class ListUsecase {
   /**
    * List all packages in the lockfile
    */
-  listAll(options: Pick<ListOptions, "projectFilter"> = {}): FormattedResult[] {
+  listAll(options: Pick<ListOptions, "projectFilter" | "omitTypes"> = {}): FormattedResult[] {
     const results: FormattedResult[] = [];
-    const { projectFilter } = options;
+    const { projectFilter, omitTypes = [] } = options;
 
     // Traverse the lockfile to collect all packages
     traverseLockfile(this.lockfile, (context) => {
@@ -195,6 +207,11 @@ export class ListUsecase {
         ].includes(depType);
 
         if (isDepSection) {
+          // Skip if this type should be omitted
+          if (omitTypes.includes(depType)) {
+            return;
+          }
+
           const depInfo = value as { specifier: string; version: string };
 
           results.push({

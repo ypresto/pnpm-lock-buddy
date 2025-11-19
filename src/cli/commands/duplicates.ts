@@ -28,6 +28,10 @@ export function createDuplicatesCommand(): Command {
       "--omit <types...>",
       'Omit dependency types: "dev", "optional", "peer" (e.g., --omit=dev --omit=optional)',
     )
+    .option(
+      "--ignore-dev",
+      'Shorthand for --omit=dev (ignore development dependencies)',
+    )
     .option("--deps", "Show dependency tree paths from root to target packages")
     .option(
       "--deps-depth <number>",
@@ -54,6 +58,12 @@ export function createDuplicatesCommand(): Command {
     .option("-o, --output <format>", "Output format: tree, json", "tree")
     .action(async (packageNames: string[], options) => {
       try {
+        // Handle --ignore-dev flag as shorthand for --omit=dev
+        let omitTypes = options.omit;
+        if (options.ignoreDev) {
+          omitTypes = omitTypes ? [...omitTypes, "dev"] : ["dev"];
+        }
+
         // Parse deps options
         const showDependencyTree = options.deps === true;
         const compactTreeDepth = options.depsDepth
@@ -127,7 +137,7 @@ export function createDuplicatesCommand(): Command {
             showAll: true,
             packageFilter: packageNames.length > 0 ? packageNames : undefined,
             projectFilter: projectFilter,
-            omitTypes: options.omit,
+            omitTypes: omitTypes,
           });
 
           // Check if any package has file variants or multiple resolution contexts
@@ -167,7 +177,7 @@ export function createDuplicatesCommand(): Command {
               showAll: options.all,
               packageFilter: packageNames.length > 0 ? packageNames : undefined,
               projectFilter: projectFilter,
-              omitTypes: options.omit,
+              omitTypes: omitTypes,
               checkHoist: options.hoist,
               modulesDir: options.modulesDir,
             });
@@ -228,7 +238,7 @@ export function createDuplicatesCommand(): Command {
             showAll: options.all,
             packageFilter: packageNames.length > 0 ? packageNames : undefined,
             projectFilter: options.project,
-            omitTypes: options.omit,
+            omitTypes: omitTypes,
             checkHoist: options.hoist,
             modulesDir: options.modulesDir,
           });
