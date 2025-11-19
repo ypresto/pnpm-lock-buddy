@@ -481,9 +481,36 @@ export class DuplicatesUsecase {
         );
 
         // Filter out instances that have no matching projects
-        const filteredInstances = instances.filter(
+        let filteredInstances = instances.filter(
           (inst) => inst.projects.length > 0,
         );
+
+        // Apply omit types filter if specified
+        if (options.omitTypes && options.omitTypes.length > 0) {
+          const omitTypes = options.omitTypes;
+          filteredInstances = filteredInstances.filter((inst) => {
+            // Check if this package is a dev/optional/peer dependency in ANY of its importers
+            for (const importerPath of inst.projects) {
+              if (importerPath.includes("hoisted") || importerPath.includes("available")) {
+                continue; // Skip synthetic hoisted entries
+              }
+              const importerData = this.dependencyTracker.getImporterData(importerPath);
+              if (!importerData) continue;
+
+              // Check if this package is in devDependencies/optionalDependencies/peerDependencies
+              if (importerData.devDependencies?.[packageName] && omitTypes.includes("dev")) {
+                return false; // Omit this instance
+              }
+              if (importerData.optionalDependencies?.[packageName] && omitTypes.includes("optional")) {
+                return false; // Omit this instance
+              }
+              if (importerData.peerDependencies?.[packageName] && omitTypes.includes("peer")) {
+                return false; // Omit this instance
+              }
+            }
+            return true; // Keep this instance
+          });
+        }
 
         // When project filter is applied, check duplicates based on filtered results
         // Otherwise check based on original instance count
@@ -772,10 +799,33 @@ export class DuplicatesUsecase {
               return true; // No omit filter, keep all instances
             }
 
-            // Use dependencyType instead of dependencyInfo.typeSummary to avoid computing expensive paths
+            // Check if this package is a dev/optional/peer dependency in ANY of its importers
+            // This is necessary because getDependencyType returns the highest priority type
+            // across all importers, which may hide that the package is also a dev dependency
+            const packageName = pkg.packageName;
+            for (const importerPath of inst.projects || []) {
+              if (importerPath.includes("hoisted") || importerPath.includes("available")) {
+                continue; // Skip synthetic hoisted entries
+              }
+              const importerData = this.dependencyTracker.getImporterData(importerPath);
+              if (!importerData) continue;
+
+              // Check if this package is in devDependencies/optionalDependencies/peerDependencies
+              if (importerData.devDependencies?.[packageName] && options.omitTypes.includes("dev")) {
+                return false; // Omit this instance
+              }
+              if (importerData.optionalDependencies?.[packageName] && options.omitTypes.includes("optional")) {
+                return false; // Omit this instance
+              }
+              if (importerData.peerDependencies?.[packageName] && options.omitTypes.includes("peer")) {
+                return false; // Omit this instance
+              }
+            }
+
+            // Fallback: check the dependencyType for transitive dependencies
             const depType =
-              inst.dependencyType ||
               inst.dependencyInfo?.typeSummary ||
+              inst.dependencyType ||
               "transitive";
             return !this.shouldOmitDependencyType(depType, options.omitTypes);
           }),
