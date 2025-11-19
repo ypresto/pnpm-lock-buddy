@@ -152,7 +152,13 @@ function formatPathsWithPrefixMerging(
       }
 
       const isLinked = step.specifier?.startsWith("link:");
-      const typeCode = isLinked ? "link:" : getTypeShortCode(step.type);
+      const typeShortCode = getTypeShortCode(step.type);
+      // Combine dev/optional/peer flags with link: if it's a linked dependency
+      const typeCode = isLinked
+        ? typeShortCode
+          ? `${typeShortCode},link:`
+          : "link:"
+        : typeShortCode;
 
       // Calculate if this is the last occurrence of this depth across all paths
       const isLastAtThisDepth = !allPaths.some(
@@ -258,7 +264,13 @@ function formatDependencyTree(
       }
 
       const isLinked = step.specifier?.startsWith("link:");
-      const typeCode = isLinked ? "link:" : getTypeShortCode(step.type);
+      const typeShortCode = getTypeShortCode(step.type);
+      // Combine dev/optional/peer flags with link: if it's a linked dependency
+      const typeCode = isLinked
+        ? typeShortCode
+          ? `${typeShortCode},link:`
+          : "link:"
+        : typeShortCode;
 
       let prefix = "";
       if (i === 0) {
