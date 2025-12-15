@@ -356,24 +356,46 @@ export function formatDuplicates(
 
     lines.push(header + ":");
 
-    for (const instance of dup.instances) {
-      if (showDependencyTree && instance.dependencyInfo) {
-        for (const project of instance.projects) {
-          lines.push(`  ${project}:`);
+    if (showDependencyTree) {
+      // Group instances by project to avoid repeating project names
+      const projectGroups = new Map<
+        string,
+        Array<(typeof dup.instances)[0]>
+      >();
+
+      for (const instance of dup.instances) {
+        if (instance.dependencyInfo) {
+          for (const project of instance.projects) {
+            if (!projectGroups.has(project)) {
+              projectGroups.set(project, []);
+            }
+            projectGroups.get(project)!.push(instance);
+          }
+        }
+      }
+
+      // Display grouped by project
+      for (const [project, instances] of projectGroups) {
+        lines.push(`  ${project}:`);
+
+        for (const instance of instances) {
           lines.push(
             ...formatDependencyTree(
-              instance.dependencyInfo.path,
+              instance.dependencyInfo!.path,
               versionColor,
               useColor,
               "  ",
-              instance.dependencyInfo.allPaths,
+              instance.dependencyInfo!.allPaths,
               compactTreeDepth,
               versionMap,
               dup.packageName,
             ),
           );
         }
-      } else {
+      }
+    } else {
+      // Non-tree display mode
+      for (const instance of dup.instances) {
         const typeInfo = instance.dependencyType
           ? ` (${instance.dependencyType})`
           : "";
