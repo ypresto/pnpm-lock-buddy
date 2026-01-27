@@ -175,7 +175,9 @@ export class ListUsecase {
   /**
    * List all packages in the lockfile
    */
-  listAll(options: Pick<ListOptions, "projectFilter" | "omitTypes"> = {}): FormattedResult[] {
+  listAll(
+    options: Pick<ListOptions, "projectFilter" | "omitTypes"> = {},
+  ): FormattedResult[] {
     const results: FormattedResult[] = [];
     const { projectFilter, omitTypes = [] } = options;
 

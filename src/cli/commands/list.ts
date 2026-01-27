@@ -22,7 +22,7 @@ export function createListCommand(): Command {
     )
     .option(
       "--ignore-dev",
-      'Shorthand for --omit=dev (ignore development dependencies)',
+      "Shorthand for --omit=dev (ignore development dependencies)",
     )
     .option("-o, --output <format>", "Output format: tree, json, list", "tree")
     .action((packageName: string | undefined, options) => {

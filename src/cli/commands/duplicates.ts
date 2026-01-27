@@ -30,7 +30,7 @@ export function createDuplicatesCommand(): Command {
     )
     .option(
       "--ignore-dev",
-      'Shorthand for --omit=dev (ignore development dependencies)',
+      "Shorthand for --omit=dev (ignore development dependencies)",
     )
     .option("--deps", "Show dependency tree paths from root to target packages")
     .option(
@@ -41,6 +41,10 @@ export function createDuplicatesCommand(): Command {
       "--depth <number>",
       "Depth for building dependency tree (default: 10, use higher for deep monorepos)",
       "10",
+    )
+    .option(
+      "--print-store-path",
+      "Show pnpm store paths instead of lockfile key format for package IDs",
     )
     .option(
       "--exit-code",
@@ -129,6 +133,9 @@ export function createDuplicatesCommand(): Command {
 
         let hasDuplicates = false;
 
+        // Set printStorePath option if requested
+        const printStorePath = options.printStorePath === true;
+
         // Auto-detect if we should use per-project format when --project is specified
         let usePerProject = options.perProject;
         if (projectFilter && !options.perProject) {
@@ -138,6 +145,7 @@ export function createDuplicatesCommand(): Command {
             packageFilter: packageNames.length > 0 ? packageNames : undefined,
             projectFilter: projectFilter,
             omitTypes: omitTypes,
+            printStorePath,
           });
 
           // Check if any package has file variants or multiple resolution contexts
@@ -180,6 +188,7 @@ export function createDuplicatesCommand(): Command {
               omitTypes: omitTypes,
               checkHoist: options.hoist,
               modulesDir: options.modulesDir,
+              printStorePath,
             });
 
           hasDuplicates = perProjectDuplicates.length > 0;
@@ -241,6 +250,7 @@ export function createDuplicatesCommand(): Command {
             omitTypes: omitTypes,
             checkHoist: options.hoist,
             modulesDir: options.modulesDir,
+            printStorePath,
           });
 
           hasDuplicates = duplicates.length > 0;

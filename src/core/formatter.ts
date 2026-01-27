@@ -85,14 +85,19 @@ function extractCanonicalVersion(
     // should map to the same canonical identifier
     return `link:${packageName}`;
   } else {
-    // Handle standard version dependencies like "react@19.1.1"
+    // Strip the package name prefix to get the version (including peer dep context)
+    // e.g., "next@16.1.4(@babel/core@7.27.7)(...)" -> "16.1.4(@babel/core@7.27.7)(...)"
+    // e.g., "@babel/core@7.27.7" -> "7.27.7"
+    const prefix = `${packageName}@`;
+    if (packageId.startsWith(prefix)) {
+      return packageId.substring(prefix.length);
+    }
+    // Fallback for store path format: use lastIndexOf but only up to first underscore or paren
     const atIndex = packageId.lastIndexOf("@");
     if (atIndex > 0) {
       return packageId.substring(atIndex + 1);
-    } else {
-      // Fallback - shouldn't happen in normal cases
-      return packageId;
     }
+    return packageId;
   }
 }
 
@@ -358,10 +363,7 @@ export function formatDuplicates(
 
     if (showDependencyTree) {
       // Group instances by project to avoid repeating project names
-      const projectGroups = new Map<
-        string,
-        Array<(typeof dup.instances)[0]>
-      >();
+      const projectGroups = new Map<string, Array<(typeof dup.instances)[0]>>();
 
       for (const instance of dup.instances) {
         if (instance.dependencyInfo) {

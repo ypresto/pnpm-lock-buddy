@@ -528,8 +528,9 @@ describe("DependencyTracker", () => {
       const tracker = new DependencyTracker(lockfilePath);
 
       // Verify that eslint-plugin-storybook is accessible from root
-      const storybookImporters =
-        await tracker.getImportersForPackage("eslint-plugin-storybook@9.1.12");
+      const storybookImporters = await tracker.getImportersForPackage(
+        "eslint-plugin-storybook@9.1.12",
+      );
       expect(storybookImporters).toContain(".");
       expect(storybookImporters).toContain("packages/shared/constants");
       expect(storybookImporters).toContain("packages/shared/eslint-config");

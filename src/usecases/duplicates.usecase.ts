@@ -24,12 +24,13 @@ export interface DuplicatesOptions {
   omitTypes?: string[]; // "dev", "optional", "peer"
   checkHoist?: boolean;
   modulesDir?: string;
+  printStorePath?: boolean; // Show store paths instead of lockfile key format
 }
 
 export type OutputFormat = "tree" | "json";
 
 interface PackageInstance {
-  id: string;
+  id: string; // Store path format: pkg@version_peer-hash
   packageName: string;
   version: string;
   dependencies: Record<string, string>;
@@ -57,6 +58,7 @@ export class DuplicatesUsecase {
   private lockfilePath: string;
   private modulesYaml?: ModulesYaml;
   private hoistedVersions?: Map<string, HoistedVersionInfo[]>; // packageName -> hoisted version info
+  private printStorePath = false; // Show store paths instead of lockfile key format
 
   constructor(
     lockfilePath: string,
@@ -319,6 +321,168 @@ export class DuplicatesUsecase {
   }
 
   /**
+   * Extract store path ID from node.path which includes peer dependency hash.
+   * Path format: .../.pnpm/{name}@{version}_{peer-hash}/node_modules/{name}
+   * Returns the store path format: {name}@{version}_{peer-hash}
+   */
+  private extractStorePathFromNode(node: PackageNode): string | null {
+    if (!node.path) {
+      return null;
+    }
+
+    const pnpmMatch = node.path.match(/\.pnpm\/([^/]+)\/node_modules\//);
+    if (pnpmMatch && pnpmMatch[1]) {
+      const packageId = pnpmMatch[1];
+      // Decode + to / for scoped packages
+      return packageId.replace(/\+/g, "/");
+    }
+
+    return null;
+  }
+
+  // Cached index: package name -> snapshot keys
+  private snapshotKeyIndex: Map<string, string[]> | null = null;
+
+  /**
+   * Build index of snapshot keys by package name (lazy, once)
+   */
+  private buildSnapshotKeyIndex(): Map<string, string[]> {
+    if (this.snapshotKeyIndex) {
+      return this.snapshotKeyIndex;
+    }
+
+    this.snapshotKeyIndex = new Map();
+    const snapshots = this.lockfile.snapshots || {};
+
+    for (const key of Object.keys(snapshots)) {
+      // Extract package name: handle scoped (@org/pkg) and regular (pkg)
+      // Format: pkg@version or pkg@version(peers...)
+      let name: string;
+      if (key.startsWith("@")) {
+        // Scoped package: @org/pkg@version...
+        const slashIdx = key.indexOf("/");
+        const atIdx = key.indexOf("@", slashIdx + 1);
+        name = atIdx > 0 ? key.substring(0, atIdx) : key;
+      } else {
+        // Regular package: pkg@version...
+        const atIdx = key.indexOf("@");
+        name = atIdx > 0 ? key.substring(0, atIdx) : key;
+      }
+
+      if (!this.snapshotKeyIndex.has(name)) {
+        this.snapshotKeyIndex.set(name, []);
+      }
+      this.snapshotKeyIndex.get(name)!.push(key);
+    }
+
+    return this.snapshotKeyIndex;
+  }
+
+  /**
+   * Find lockfile snapshot key from store path.
+   * Store path: pkg@version_peer1@ver_hash
+   * Lockfile: pkg@version(peer1@ver)(peer2@ver)
+   */
+  private findLockfileKey(
+    packageName: string,
+    storePath: string,
+  ): string | null {
+    const index = this.buildSnapshotKeyIndex();
+    const candidates = index.get(packageName);
+
+    if (!candidates || candidates.length === 0) {
+      return null;
+    }
+
+    if (candidates.length === 1) {
+      return candidates[0]!;
+    }
+
+    // Extract version from store path: pkg@version_...
+    const versionMatch = storePath.match(
+      new RegExp(
+        `^${packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}@([^_]+)`,
+      ),
+    );
+    const version = versionMatch?.[1];
+
+    if (!version) {
+      return candidates[0]!;
+    }
+
+    // Filter by version
+    const versionPrefix = `${packageName}@${version}`;
+    const versionMatches = candidates.filter(
+      (k) => k === versionPrefix || k.startsWith(versionPrefix + "("),
+    );
+
+    if (versionMatches.length <= 1) {
+      return versionMatches[0] ?? candidates[0]!;
+    }
+
+    // Multiple candidates with same version - match by unique peer deps
+    // Find peers that distinguish candidates from each other
+    const allPeers = new Map<string, string[]>(); // peerName -> candidates that have it
+
+    for (const candidate of versionMatches) {
+      // Extract all peer package names from lockfile key
+      const peerMatches = candidate.matchAll(/@([a-z0-9@/-]+)/gi);
+      for (const m of peerMatches) {
+        const peerName = m[1]!;
+        if (!allPeers.has(peerName)) {
+          allPeers.set(peerName, []);
+        }
+        allPeers.get(peerName)!.push(candidate);
+      }
+    }
+
+    // Find distinguishing peers (appear in some but not all candidates)
+    const distinguishingPeers: string[] = [];
+    for (const [peer, candidates] of allPeers) {
+      if (candidates.length < versionMatches.length) {
+        distinguishingPeers.push(peer);
+      }
+    }
+
+    // Match store path against distinguishing peers
+    for (const candidate of versionMatches) {
+      let matches = true;
+      for (const peer of distinguishingPeers) {
+        const inCandidate = candidate.includes(peer);
+        const inStorePath = storePath.includes(peer.substring(0, 8)); // truncated in store path
+        if (inCandidate !== inStorePath) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        return candidate;
+      }
+    }
+
+    return versionMatches[0]!;
+  }
+
+  /**
+   * Extract unique instance ID from node.path.
+   * Returns lockfile snapshot key if found (unless printStorePath is set), otherwise store path.
+   */
+  private extractInstanceIdFromPath(node: PackageNode): string {
+    const storePath = this.extractStorePathFromNode(node);
+    if (!storePath) {
+      return `${node.name}@${node.version}`;
+    }
+
+    // If printStorePath is set, always return store path
+    if (this.printStorePath) {
+      return storePath;
+    }
+
+    const lockfileKey = this.findLockfileKey(node.name, storePath);
+    return lockfileKey || storePath;
+  }
+
+  /**
    * Recursively collect package instances from tree nodes
    */
   private collectFromTreeNodes(
@@ -334,15 +498,17 @@ export class DuplicatesUsecase {
       }
       visitedNodes.add(node);
 
-      const instanceId = `${node.name}@${node.version}`;
-      const parsed = parsePackageString(instanceId);
+      // Extract unique instance ID from path which includes peer dependency context
+      // This allows detecting multiple instances with same name@version but different peer deps
+      const instanceId = this.extractInstanceIdFromPath(node);
+      const packageName = node.name;
 
-      if (parsed.name) {
+      if (packageName) {
         if (!instancesMap.has(instanceId)) {
           const instance: PackageInstance = {
             id: instanceId,
-            packageName: parsed.name,
-            version: parsed.version || node.version,
+            packageName: packageName,
+            version: node.version,
             dependencies: {}, // Will be filled from snapshots if needed
             projects: new Set(),
           };
@@ -377,7 +543,12 @@ export class DuplicatesUsecase {
       projectFilter,
       checkHoist,
       modulesDir,
+      printStorePath = false,
     } = options;
+
+    // Set the printStorePath flag for instance ID formatting
+    this.printStorePath = printStorePath;
+    this.dependencyTracker.setPrintStorePath(printStorePath);
 
     // Load hoist info if requested
     if (checkHoist) {
@@ -491,20 +662,33 @@ export class DuplicatesUsecase {
           filteredInstances = filteredInstances.filter((inst) => {
             // Check if this package is a dev/optional/peer dependency in ANY of its importers
             for (const importerPath of inst.projects) {
-              if (importerPath.includes("hoisted") || importerPath.includes("available")) {
+              if (
+                importerPath.includes("hoisted") ||
+                importerPath.includes("available")
+              ) {
                 continue; // Skip synthetic hoisted entries
               }
-              const importerData = this.dependencyTracker.getImporterData(importerPath);
+              const importerData =
+                this.dependencyTracker.getImporterData(importerPath);
               if (!importerData) continue;
 
               // Check if this package is in devDependencies/optionalDependencies/peerDependencies
-              if (importerData.devDependencies?.[packageName] && omitTypes.includes("dev")) {
+              if (
+                importerData.devDependencies?.[packageName] &&
+                omitTypes.includes("dev")
+              ) {
                 return false; // Omit this instance
               }
-              if (importerData.optionalDependencies?.[packageName] && omitTypes.includes("optional")) {
+              if (
+                importerData.optionalDependencies?.[packageName] &&
+                omitTypes.includes("optional")
+              ) {
                 return false; // Omit this instance
               }
-              if (importerData.peerDependencies?.[packageName] && omitTypes.includes("peer")) {
+              if (
+                importerData.peerDependencies?.[packageName] &&
+                omitTypes.includes("peer")
+              ) {
                 return false; // Omit this instance
               }
             }
@@ -804,20 +988,33 @@ export class DuplicatesUsecase {
             // across all importers, which may hide that the package is also a dev dependency
             const packageName = pkg.packageName;
             for (const importerPath of inst.projects || []) {
-              if (importerPath.includes("hoisted") || importerPath.includes("available")) {
+              if (
+                importerPath.includes("hoisted") ||
+                importerPath.includes("available")
+              ) {
                 continue; // Skip synthetic hoisted entries
               }
-              const importerData = this.dependencyTracker.getImporterData(importerPath);
+              const importerData =
+                this.dependencyTracker.getImporterData(importerPath);
               if (!importerData) continue;
 
               // Check if this package is in devDependencies/optionalDependencies/peerDependencies
-              if (importerData.devDependencies?.[packageName] && options.omitTypes.includes("dev")) {
+              if (
+                importerData.devDependencies?.[packageName] &&
+                options.omitTypes.includes("dev")
+              ) {
                 return false; // Omit this instance
               }
-              if (importerData.optionalDependencies?.[packageName] && options.omitTypes.includes("optional")) {
+              if (
+                importerData.optionalDependencies?.[packageName] &&
+                options.omitTypes.includes("optional")
+              ) {
                 return false; // Omit this instance
               }
-              if (importerData.peerDependencies?.[packageName] && options.omitTypes.includes("peer")) {
+              if (
+                importerData.peerDependencies?.[packageName] &&
+                options.omitTypes.includes("peer")
+              ) {
                 return false; // Omit this instance
               }
             }

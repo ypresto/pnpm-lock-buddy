@@ -18,17 +18,26 @@ export class DependencyTracker {
   private lockfileDir: string;
   private depth: number;
   private lockfile: PnpmLockfile | null = null;
+  private snapshotKeyIndex: Map<string, string[]> | null = null;
   private dependencyTrees: Record<string, PackageNode[]> = {};
   private dependencyMap = new Map<string, PackageDependencyInfo>();
   private importerCache = new Map<string, string[]>(); // packageId -> importers (cached)
   private linkedDependencies = new Map<string, LinkedDependencyInfo[]>(); // importer -> linked deps
   private allPathsCache = new Map<string, DependencyPathStep[][]>(); // (importerPath, packageId) -> paths (cached)
   private initPromise: Promise<void> | null = null;
+  private printStorePath = false; // Show store paths instead of lockfile key format
 
   constructor(lockfilePath: string, depth: number = 10) {
     this.lockfilePath = lockfilePath;
     this.lockfileDir = path.dirname(lockfilePath);
     this.depth = depth;
+  }
+
+  /**
+   * Set whether to print store paths instead of lockfile key format
+   */
+  setPrintStorePath(value: boolean): void {
+    this.printStorePath = value;
   }
 
   private getLockfile(): PnpmLockfile {
@@ -271,7 +280,8 @@ export class DependencyTracker {
                       ? lockfile.importers?.[sourceImporter]
                       : undefined;
                     const isDev = !!importerData?.devDependencies?.[depName];
-                    const isOptional = !!importerData?.optionalDependencies?.[depName];
+                    const isOptional =
+                      !!importerData?.optionalDependencies?.[depName];
 
                     existingChild.dependencies =
                       linkDeps.length > 0 ? linkDeps : undefined;
@@ -288,7 +298,8 @@ export class DependencyTracker {
                       ? lockfile.importers?.[sourceImporter]
                       : undefined;
                     const isDev = !!importerData?.devDependencies?.[depName];
-                    const isOptional = !!importerData?.optionalDependencies?.[depName];
+                    const isOptional =
+                      !!importerData?.optionalDependencies?.[depName];
 
                     const linkNode: PackageNode = {
                       alias: depName,
@@ -887,6 +898,147 @@ export class DependencyTracker {
   }
 
   /**
+   * Extract unique instance ID from node.path which includes peer dependency hash.
+   * Path format: .../.pnpm/{name}@{version}_{peer-hash}/node_modules/{name}
+   */
+  private extractInstanceIdFromPath(node: PackageNode): string {
+    const fallbackId = `${node.name}@${node.version}`;
+    if (!node.path) {
+      return fallbackId;
+    }
+
+    const pnpmMatch = node.path.match(/\.pnpm\/([^/]+)\/node_modules\//);
+    if (pnpmMatch && pnpmMatch[1]) {
+      const packageId = pnpmMatch[1];
+      const decoded = packageId.replace(/\+/g, "/");
+      return decoded;
+    }
+
+    return fallbackId;
+  }
+
+  /**
+   * Build index of snapshot keys by package name (lazy, once)
+   */
+  private buildSnapshotKeyIndex(): Map<string, string[]> {
+    if (this.snapshotKeyIndex) {
+      return this.snapshotKeyIndex;
+    }
+
+    this.snapshotKeyIndex = new Map();
+    const lockfile = this.getLockfile();
+    const snapshots = lockfile.snapshots || {};
+
+    for (const key of Object.keys(snapshots)) {
+      let name: string;
+      if (key.startsWith("@")) {
+        const slashIdx = key.indexOf("/");
+        const atIdx = key.indexOf("@", slashIdx + 1);
+        name = atIdx > 0 ? key.substring(0, atIdx) : key;
+      } else {
+        const atIdx = key.indexOf("@");
+        name = atIdx > 0 ? key.substring(0, atIdx) : key;
+      }
+
+      if (!this.snapshotKeyIndex.has(name)) {
+        this.snapshotKeyIndex.set(name, []);
+      }
+      this.snapshotKeyIndex.get(name)!.push(key);
+    }
+
+    return this.snapshotKeyIndex;
+  }
+
+  /**
+   * Find lockfile snapshot key from store path
+   */
+  private findLockfileKey(packageName: string, storePath: string): string {
+    const index = this.buildSnapshotKeyIndex();
+    const candidates = index.get(packageName);
+
+    if (!candidates || candidates.length === 0) {
+      return storePath;
+    }
+
+    if (candidates.length === 1) {
+      return candidates[0]!;
+    }
+
+    // Extract version from store path
+    const versionMatch = storePath.match(
+      new RegExp(
+        `^${packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}@([^_]+)`,
+      ),
+    );
+    const version = versionMatch?.[1];
+    if (!version) {
+      return candidates[0]!;
+    }
+
+    // Filter by version
+    const versionPrefix = `${packageName}@${version}`;
+    const versionMatches = candidates.filter(
+      (k) => k === versionPrefix || k.startsWith(versionPrefix + "("),
+    );
+
+    if (versionMatches.length <= 1) {
+      return versionMatches[0] ?? candidates[0]!;
+    }
+
+    // Match by distinguishing peer deps
+    const allPeers = new Map<string, string[]>();
+    for (const candidate of versionMatches) {
+      const peerMatches = candidate.matchAll(/@([a-z0-9@/-]+)/gi);
+      for (const m of peerMatches) {
+        const peerName = m[1]!;
+        if (!allPeers.has(peerName)) {
+          allPeers.set(peerName, []);
+        }
+        allPeers.get(peerName)!.push(candidate);
+      }
+    }
+
+    const distinguishingPeers: string[] = [];
+    for (const [peer, cands] of allPeers) {
+      if (cands.length < versionMatches.length) {
+        distinguishingPeers.push(peer);
+      }
+    }
+
+    for (const candidate of versionMatches) {
+      let matches = true;
+      for (const peer of distinguishingPeers) {
+        const inCandidate = candidate.includes(peer);
+        const inStorePath = storePath.includes(peer.substring(0, 8));
+        if (inCandidate !== inStorePath) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        return candidate;
+      }
+    }
+
+    return versionMatches[0]!;
+  }
+
+  /**
+   * Get display ID for a node (lockfile key format, or store path if printStorePath is set)
+   */
+  private getDisplayId(node: PackageNode): string {
+    const storePath = this.extractInstanceIdFromPath(node);
+    if (storePath === `${node.name}@${node.version}`) {
+      return storePath;
+    }
+    // If printStorePath is set, return store path directly
+    if (this.printStorePath) {
+      return storePath;
+    }
+    return this.findLockfileKey(node.name, storePath);
+  }
+
+  /**
    * Find path to target package in tree
    */
   private findPathInTree(
@@ -902,14 +1054,18 @@ export class DependencyTracker {
     }
     for (const node of nodes) {
       const nodeId = `${node.name}@${node.version}`;
+      // Also get the path-based ID for matching with peer dep context
+      const pathBasedId = this.extractInstanceIdFromPath(node);
 
       // Prevent infinite recursion from circular dependencies in current path
       if (visitedNodeIds.has(nodeId)) {
         continue;
       }
 
+      const displayId = this.getDisplayId(node);
+
       const step: DependencyPathStep = {
-        package: nodeId,
+        package: displayId, // Use lockfile key format for display
         type: node.isPeer
           ? "peerDependencies"
           : node.dev
@@ -922,10 +1078,13 @@ export class DependencyTracker {
 
       const newPath = [...currentPath, step];
 
-      // Only match exact version, not just package name
-      // This prevents matching react@19.1.1 when searching for react@18.2.0
+      // Match by simple name@version, store path, or lockfile format
       const exactMatch =
-        nodeId === targetPackageId || nodeId.startsWith(targetPackageId);
+        nodeId === targetPackageId ||
+        pathBasedId === targetPackageId ||
+        displayId === targetPackageId ||
+        targetPackageId.startsWith(nodeId + "_") || // store path format
+        targetPackageId.startsWith(nodeId + "("); // lockfile format
 
       if (exactMatch) {
         return newPath;
@@ -1017,6 +1176,8 @@ export class DependencyTracker {
 
     for (const node of nodes) {
       const nodeId = `${node.name}@${node.version}`;
+      // Also get the path-based ID for matching with peer dep context
+      const pathBasedId = this.extractInstanceIdFromPath(node);
 
       // Check if this node ID creates a circular dependency in current path
       if (visitedNodeIds.has(nodeId)) {
@@ -1024,8 +1185,10 @@ export class DependencyTracker {
         continue;
       }
 
+      const displayId = this.getDisplayId(node);
+
       const step: DependencyPathStep = {
-        package: nodeId,
+        package: displayId, // Use lockfile key format for display
         type: node.isPeer
           ? "peerDependencies"
           : node.dev
@@ -1038,10 +1201,13 @@ export class DependencyTracker {
 
       const newPath = [...currentPath, step];
 
-      // Only match exact version, not just package name
-      // This prevents matching react@19.1.1 when searching for react@18.2.0
+      // Match by simple name@version, store path, or lockfile format
       const exactMatch =
-        nodeId === targetPackageId || nodeId.startsWith(targetPackageId);
+        nodeId === targetPackageId ||
+        pathBasedId === targetPackageId ||
+        displayId === targetPackageId ||
+        targetPackageId.startsWith(nodeId + "_") || // store path format
+        targetPackageId.startsWith(nodeId + "("); // lockfile format
 
       if (exactMatch) {
         paths.push(newPath);
