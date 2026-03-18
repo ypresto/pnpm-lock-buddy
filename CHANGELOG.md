@@ -8,6 +8,7 @@
   - Root cause: the peer extraction regex `/@([a-z0-9@/-]+)/gi` did not include `.` in the character class, so version numbers like `7.27.7` and `7.28.6` were both truncated to `7`, producing zero distinguishing peers.
   - Replaced the heuristic store-path-to-lockfile-key matching with deterministic matching using `@pnpm/dependency-path`'s `depPathToFilename`.
 - Fix `--per-project` mode not detecting same-version-different-peer-deps as duplicates. The per-project duplicate check compared base versions (stripping peer deps), so two instances of `pkg@1.0.0` with different peer resolutions were not flagged. Now compares instance IDs instead.
+- Fix store path hash detection to handle pnpm v9 base32 hashes (26 chars) in addition to pnpm v10 hex hashes (32 chars). When the exact hash doesn't match (different pnpm versions use different hash algorithms), falls back to prefix matching on the deterministic part before the hash suffix.
 
 ### Added
 
