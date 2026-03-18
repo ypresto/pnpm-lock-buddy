@@ -1,6 +1,20 @@
 import { depPathToFilename } from "@pnpm/dependency-path";
 
 /**
+ * Detect hash suffix in a store path filename.
+ * pnpm v10 uses 32-char hex hashes, pnpm v9 uses 26-char base32 hashes.
+ * Returns the match object with index pointing to the underscore before the hash.
+ */
+function detectHashSuffix(
+  storePath: string,
+): { index: number; hash: string } | null {
+  // Match _<hash> at end: 32 hex chars (v10) or 26 base32 chars (v9)
+  const match = storePath.match(/_([a-z0-9]{26}|[0-9a-f]{32})$/);
+  if (!match) return null;
+  return { index: match.index!, hash: match[1]! };
+}
+
+/**
  * Find the lockfile snapshot key that corresponds to a store path.
  *
  * @param packageName - Package name, e.g. "next-navigation-guard"
@@ -47,25 +61,29 @@ export function resolveStorePathToLockfileKey(
   // Re-encode store path back to + format for comparison with depPathToFilename output
   const rawStorePath = storePath.replace(/\//g, "+");
 
-  // Determine maxLength from the store path itself
-  // If store path has a hash suffix, maxLength = storePath.length
-  // If no hash suffix, use a large number (no truncation needed)
-  const hashMatch = rawStorePath.match(/_[0-9a-f]{32}$/);
-  const maxLength = hashMatch ? rawStorePath.length : 10000;
-
-  for (const candidate of versionMatches) {
-    if (depPathToFilename(candidate, maxLength) === rawStorePath) {
-      return candidate;
+  // Try exact match with depPathToFilename (works when hash algorithm matches)
+  const hashInfo = detectHashSuffix(rawStorePath);
+  if (hashInfo) {
+    const maxLength = rawStorePath.length;
+    for (const candidate of versionMatches) {
+      if (depPathToFilename(candidate, maxLength) === rawStorePath) {
+        return candidate;
+      }
     }
-  }
 
-  // Fallback: try matching without hash (for pnpm v9 base32 hashes or other formats)
-  // Compare the non-hash prefix of the store path
-  if (hashMatch) {
-    const storePrefix = rawStorePath.substring(0, hashMatch.index!);
+    // Hash algorithm mismatch (e.g. pnpm v9 base32 vs v10 hex) -
+    // compare the non-hash prefix which is deterministic regardless of hash algorithm
+    const storePrefix = rawStorePath.substring(0, hashInfo.index);
     for (const candidate of versionMatches) {
       const candidateFilename = depPathToFilename(candidate, 10000);
       if (candidateFilename.startsWith(storePrefix)) {
+        return candidate;
+      }
+    }
+  } else {
+    // No hash suffix - direct comparison with non-truncated filename
+    for (const candidate of versionMatches) {
+      if (depPathToFilename(candidate, 10000) === rawStorePath) {
         return candidate;
       }
     }

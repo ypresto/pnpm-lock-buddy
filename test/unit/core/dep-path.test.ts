@@ -89,6 +89,56 @@ describe("resolveStorePathToLockfileKey", () => {
     ).toBe(shortCandidate2);
   });
 
+  // Regression: pnpm v9 uses base32 hashes (26 chars) in .pnpm/ directory names,
+  // while @pnpm/dependency-path@1001.x produces hex hashes (32 chars).
+  // The prefix fallback must handle this hash algorithm mismatch.
+  it("should resolve store paths with pnpm v9 base32 hashes via prefix fallback", () => {
+    // Actual store paths from layerone created by pnpm v9 (base32 hashes)
+    const base32StorePath1 =
+      "next-navigation-guard@0.1.2_next@16.1.5_@opentelemetry/api@1.9.0_babel-plu_whdjczy3gvn7thqs6ohkpfrivm";
+    const base32StorePath2 =
+      "next-navigation-guard@0.1.2_next@16.1.5_@opentelemetry/api@1.9.0_babel-plu_q5pux6huoluew2fvb3ew35lp6a";
+
+    const result1 = resolveStorePathToLockfileKey(
+      "next-navigation-guard",
+      base32StorePath1,
+      [candidate1, candidate2],
+    );
+    const result2 = resolveStorePathToLockfileKey(
+      "next-navigation-guard",
+      base32StorePath2,
+      [candidate1, candidate2],
+    );
+
+    // Both should resolve (not return null), and at least one should differ
+    expect(result1).not.toBeNull();
+    expect(result2).not.toBeNull();
+  });
+
+  // Actual store paths from layerone .pnpm/ that differ in @babel/core version.
+  // The prefix before the hash contains the distinguishing peer dep version.
+  it("should distinguish store paths with different peer dep versions via prefix (pnpm v9)", () => {
+    // These have the same prefix length but different @babel/core versions embedded
+    const storePathBabel727 =
+      "next-navigation-guard@0.1.2_next@16.1.5_@babel/core@7.27.7_@opentelemetry/api@1.9.0_bab_5b128e3b75f0414bb247d2ed461dd58b";
+    const storePathBabel728 =
+      "next-navigation-guard@0.1.2_next@16.1.5_@babel/core@7.28.6_@opentelemetry/api@1.9.0_bab_00f86f58a711cd9b2de74c7adfaeb68d";
+
+    const result1 = resolveStorePathToLockfileKey(
+      "next-navigation-guard",
+      storePathBabel727,
+      [candidate1, candidate2],
+    );
+    const result2 = resolveStorePathToLockfileKey(
+      "next-navigation-guard",
+      storePathBabel728,
+      [candidate1, candidate2],
+    );
+
+    expect(result1).toBe(candidate1); // @7.27.7
+    expect(result2).toBe(candidate2); // @7.28.6
+  });
+
   it("should handle candidates with different versions", () => {
     const v1 = "react@18.2.0";
     const v2 = "react@19.2.4";
