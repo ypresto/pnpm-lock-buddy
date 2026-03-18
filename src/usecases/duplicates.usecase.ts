@@ -16,6 +16,7 @@ import {
   type HoistedVersionInfo,
 } from "../core/modules-yaml.js";
 import path from "path";
+import { resolveStorePathToLockfileKey } from "../core/dep-path.js";
 
 export interface DuplicatesOptions {
   showAll?: boolean;
@@ -394,73 +395,7 @@ export class DuplicatesUsecase {
       return null;
     }
 
-    if (candidates.length === 1) {
-      return candidates[0]!;
-    }
-
-    // Extract version from store path: pkg@version_...
-    const versionMatch = storePath.match(
-      new RegExp(
-        `^${packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}@([^_]+)`,
-      ),
-    );
-    const version = versionMatch?.[1];
-
-    if (!version) {
-      return candidates[0]!;
-    }
-
-    // Filter by version
-    const versionPrefix = `${packageName}@${version}`;
-    const versionMatches = candidates.filter(
-      (k) => k === versionPrefix || k.startsWith(versionPrefix + "("),
-    );
-
-    if (versionMatches.length <= 1) {
-      return versionMatches[0] ?? candidates[0]!;
-    }
-
-    // Multiple candidates with same version - match by unique peer deps
-    // Find peers that distinguish candidates from each other
-    const allPeers = new Map<string, string[]>(); // peerName -> candidates that have it
-
-    for (const candidate of versionMatches) {
-      // Extract all peer package names from lockfile key
-      const peerMatches = candidate.matchAll(/@([a-z0-9@/-]+)/gi);
-      for (const m of peerMatches) {
-        const peerName = m[1]!;
-        if (!allPeers.has(peerName)) {
-          allPeers.set(peerName, []);
-        }
-        allPeers.get(peerName)!.push(candidate);
-      }
-    }
-
-    // Find distinguishing peers (appear in some but not all candidates)
-    const distinguishingPeers: string[] = [];
-    for (const [peer, candidates] of allPeers) {
-      if (candidates.length < versionMatches.length) {
-        distinguishingPeers.push(peer);
-      }
-    }
-
-    // Match store path against distinguishing peers
-    for (const candidate of versionMatches) {
-      let matches = true;
-      for (const peer of distinguishingPeers) {
-        const inCandidate = candidate.includes(peer);
-        const inStorePath = storePath.includes(peer.substring(0, 8)); // truncated in store path
-        if (inCandidate !== inStorePath) {
-          matches = false;
-          break;
-        }
-      }
-      if (matches) {
-        return candidate;
-      }
-    }
-
-    return versionMatches[0]!;
+    return resolveStorePathToLockfileKey(packageName, storePath, candidates);
   }
 
   /**
