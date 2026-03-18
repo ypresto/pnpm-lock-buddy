@@ -815,16 +815,10 @@ export class DuplicatesUsecase {
           allInstances.push(...pkg.instances);
         }
 
-        // Check if we have multiple versions (different instance IDs = potential duplicates)
-        const uniqueVersions = new Set(
-          allInstances.map((inst) => {
-            // Extract base version without peer deps
-            const parsed = parsePackageString(inst.id);
-            return parsed.version || inst.version;
-          }),
-        );
-
-        const isDuplicate = uniqueVersions.size > 1; // Multiple versions = duplicate
+        // Check if we have multiple instances (different IDs = potential duplicates)
+        // This catches both different versions AND same version with different peer deps
+        const uniqueIds = new Set(allInstances.map((inst) => inst.id));
+        const isDuplicate = uniqueIds.size > 1;
 
         // Check if there's a hoisted version mismatch for this project
         let hasHoistedMismatch = false;
@@ -965,11 +959,9 @@ export class DuplicatesUsecase {
         .filter((pkg) => pkg.instances.length > 0) // Remove packages with no instances after filtering
         .filter((pkg) => {
           // Check if this is still a duplicate after omit filtering
-          const uniqueVersionsAfterOmit = new Set(
-            pkg.instances.map((inst: any) => {
-              const parsed = parsePackageString(inst.id);
-              return parsed.version || inst.version;
-            }),
+          // Use instance IDs to catch same version with different peer deps
+          const uniqueIdsAfterOmit = new Set(
+            pkg.instances.map((inst: any) => inst.id),
           );
 
           // With --hoist, also show if there's a hoisted version mismatch
@@ -979,7 +971,7 @@ export class DuplicatesUsecase {
             pkg.instances.some((inst: any) => !inst.hoisted);
 
           return (
-            uniqueVersionsAfterOmit.size > 1 ||
+            uniqueIdsAfterOmit.size > 1 ||
             options.showAll ||
             hasHoistedMismatch
           );

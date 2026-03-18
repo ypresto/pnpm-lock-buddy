@@ -7,6 +7,7 @@
 - Fix `findLockfileKey` failing to distinguish same-version candidates with different nested peer dependency versions. Packages like `next-navigation-guard@0.1.2` resolved with `@babel/core@7.27.7` vs `@babel/core@7.28.6` were collapsed into a single instance, hiding the duplicate.
   - Root cause: the peer extraction regex `/@([a-z0-9@/-]+)/gi` did not include `.` in the character class, so version numbers like `7.27.7` and `7.28.6` were both truncated to `7`, producing zero distinguishing peers.
   - Replaced the heuristic store-path-to-lockfile-key matching with deterministic matching using `@pnpm/dependency-path`'s `depPathToFilename`.
+- Fix `--per-project` mode not detecting same-version-different-peer-deps as duplicates. The per-project duplicate check compared base versions (stripping peer deps), so two instances of `pkg@1.0.0` with different peer resolutions were not flagged. Now compares instance IDs instead.
 
 ### Added
 
