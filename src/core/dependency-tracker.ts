@@ -8,6 +8,7 @@ import type {
 import { buildDependenciesHierarchy } from "@pnpm/reviewing.dependencies-hierarchy";
 import type { PackageNode } from "@pnpm/reviewing.dependencies-hierarchy";
 import path from "path";
+import { resolveStorePathToLockfileKey } from "./dep-path.js";
 
 /**
  * Tracks transitive dependencies and provides lookup functionality
@@ -960,67 +961,10 @@ export class DependencyTracker {
       return storePath;
     }
 
-    if (candidates.length === 1) {
-      return candidates[0]!;
-    }
-
-    // Extract version from store path
-    const versionMatch = storePath.match(
-      new RegExp(
-        `^${packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}@([^_]+)`,
-      ),
+    return (
+      resolveStorePathToLockfileKey(packageName, storePath, candidates) ??
+      storePath
     );
-    const version = versionMatch?.[1];
-    if (!version) {
-      return candidates[0]!;
-    }
-
-    // Filter by version
-    const versionPrefix = `${packageName}@${version}`;
-    const versionMatches = candidates.filter(
-      (k) => k === versionPrefix || k.startsWith(versionPrefix + "("),
-    );
-
-    if (versionMatches.length <= 1) {
-      return versionMatches[0] ?? candidates[0]!;
-    }
-
-    // Match by distinguishing peer deps
-    const allPeers = new Map<string, string[]>();
-    for (const candidate of versionMatches) {
-      const peerMatches = candidate.matchAll(/@([a-z0-9@/-]+)/gi);
-      for (const m of peerMatches) {
-        const peerName = m[1]!;
-        if (!allPeers.has(peerName)) {
-          allPeers.set(peerName, []);
-        }
-        allPeers.get(peerName)!.push(candidate);
-      }
-    }
-
-    const distinguishingPeers: string[] = [];
-    for (const [peer, cands] of allPeers) {
-      if (cands.length < versionMatches.length) {
-        distinguishingPeers.push(peer);
-      }
-    }
-
-    for (const candidate of versionMatches) {
-      let matches = true;
-      for (const peer of distinguishingPeers) {
-        const inCandidate = candidate.includes(peer);
-        const inStorePath = storePath.includes(peer.substring(0, 8));
-        if (inCandidate !== inStorePath) {
-          matches = false;
-          break;
-        }
-      }
-      if (matches) {
-        return candidate;
-      }
-    }
-
-    return versionMatches[0]!;
   }
 
   /**
@@ -1078,17 +1022,23 @@ export class DependencyTracker {
 
       const newPath = [...currentPath, step];
 
-      // Match by simple name@version, store path, or lockfile format
-      const exactMatch =
+      // Exact match: node's resolved ID (lockfile key or store path) matches target
+      const isExactMatch =
         nodeId === targetPackageId ||
         pathBasedId === targetPackageId ||
-        displayId === targetPackageId ||
-        targetPackageId.startsWith(nodeId + "_") || // store path format
-        targetPackageId.startsWith(nodeId + "("); // lockfile format
+        displayId === targetPackageId;
 
-      if (exactMatch) {
+      if (isExactMatch) {
         return newPath;
       }
+
+      // Loose match: node has same name@version prefix but peer deps unresolved
+      // Only used when displayId couldn't resolve peer dep context
+      const isLooseMatch =
+        !isExactMatch &&
+        displayId === nodeId &&
+        (targetPackageId.startsWith(nodeId + "_") ||
+          targetPackageId.startsWith(nodeId + "("));
 
       if (node.dependencies) {
         // Add nodeId to visited for this path
@@ -1109,6 +1059,11 @@ export class DependencyTracker {
 
         // Remove after exploring this branch
         visitedNodeIds.delete(nodeId);
+      }
+
+      // Return loose match only after exhausting subtree (no exact match found deeper)
+      if (isLooseMatch) {
+        return newPath;
       }
     }
 
@@ -1201,21 +1156,25 @@ export class DependencyTracker {
 
       const newPath = [...currentPath, step];
 
-      // Match by simple name@version, store path, or lockfile format
-      const exactMatch =
+      // Exact match: node's resolved ID matches target
+      const isExactMatch =
         nodeId === targetPackageId ||
         pathBasedId === targetPackageId ||
-        displayId === targetPackageId ||
-        targetPackageId.startsWith(nodeId + "_") || // store path format
-        targetPackageId.startsWith(nodeId + "("); // lockfile format
+        displayId === targetPackageId;
 
-      if (exactMatch) {
+      if (isExactMatch) {
         paths.push(newPath);
-        // Check if we've reached the limit
         if (paths.length >= maxPaths) {
-          return false; // Stop searching
+          return false;
         }
       }
+
+      // Loose match: only when the node has no resolved peer dep info
+      const isLooseMatch =
+        !isExactMatch &&
+        displayId === nodeId &&
+        (targetPackageId.startsWith(nodeId + "_") ||
+          targetPackageId.startsWith(nodeId + "("));
 
       if (node.dependencies) {
         // Add nodeId to visited for this path branch
@@ -1236,6 +1195,14 @@ export class DependencyTracker {
 
         // Early termination: stop if child search says to stop
         if (!shouldContinue) {
+          return false;
+        }
+      }
+
+      // Add loose match only after exhausting subtree (no exact match found deeper)
+      if (isLooseMatch) {
+        paths.push(newPath);
+        if (paths.length >= maxPaths) {
           return false;
         }
       }
