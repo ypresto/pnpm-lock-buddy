@@ -461,21 +461,28 @@ export function formatPerProjectDuplicates(
   const versionMap = new Map<string, number>();
 
   // Build version mapping using canonical version extraction
-  // Reset counter for each package so numbering is per-package
+  // Collect all instances per package across all projects, then number them
+  const allInstancesPerPackage = new Map<string, Set<string>>();
   for (const project of perProjectDuplicates) {
     for (const pkg of project.duplicatePackages) {
-      let versionCounter = 1;
+      if (!allInstancesPerPackage.has(pkg.packageName)) {
+        allInstancesPerPackage.set(pkg.packageName, new Set());
+      }
+      const instanceIds = allInstancesPerPackage.get(pkg.packageName)!;
       for (const instance of pkg.instances) {
-        // Use canonical version extraction to handle different relative paths
         const canonicalVersion = extractCanonicalVersion(
           instance.id,
           pkg.packageName,
         );
-        const versionKey = `${pkg.packageName}@${canonicalVersion}`;
-
-        if (!versionMap.has(versionKey)) {
-          versionMap.set(versionKey, versionCounter++);
-        }
+        instanceIds.add(`${pkg.packageName}@${canonicalVersion}`);
+      }
+    }
+  }
+  for (const [, versionKeys] of allInstancesPerPackage) {
+    let versionCounter = 1;
+    for (const versionKey of versionKeys) {
+      if (!versionMap.has(versionKey)) {
+        versionMap.set(versionKey, versionCounter++);
       }
     }
   }
