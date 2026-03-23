@@ -29,7 +29,7 @@ inputs:
     required: false
     default: '.pnpm-lock-buddy-ignore'
   comment:
-    description: 'Post results as a collapsible PR comment. Requires pull_request trigger. GITHUB_TOKEN is available by default but may need pull-requests: write permission.'
+    description: 'Post results as a collapsible PR comment. Silently skipped on non-pull_request triggers. May need pull-requests: write permission.'
     required: false
     default: 'false'
   max-old-space-size:
