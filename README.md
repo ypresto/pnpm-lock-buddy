@@ -58,7 +58,7 @@ Use `ypresto/pnpm-lock-buddy/duplicates@v1` to check for duplicates in CI:
     packages: 'next react react-dom @types/react'
 ```
 
-The step fails if duplicates are found. Results are posted as a collapsible PR comment by default.
+The step fails if duplicates are found. Set `comment: 'true'` to post results as a collapsible PR comment.
 
 ### Action Inputs
 
@@ -70,7 +70,7 @@ The step fails if duplicates are found. Results are posted as a collapsible PR c
 | `omit` | | Dependency types to omit (e.g., `dev optional`) |
 | `lockfile` | | Path to pnpm-lock.yaml |
 | `ignore-file` | `.pnpm-lock-buddy-ignore` | Path to ignore file |
-| `comment` | `true` | Post results as a collapsible PR comment |
+| `comment` | `false` | Post results as a collapsible PR comment (needs `pull-requests: write`) |
 | `max-old-space-size` | `8192` | Node.js heap size in MB |
 | `version` | (bundled) | pnpm-lock-buddy version |
 | `extra-args` | | Additional CLI arguments |
