@@ -26,6 +26,8 @@ export interface DuplicatesOptions {
   checkHoist?: boolean;
   modulesDir?: string;
   printStorePath?: boolean; // Show store paths instead of lockfile key format
+  ignoreProjects?: string[];
+  ignorePackageProjects?: Array<{ project: string; package: string }>;
 }
 
 export type OutputFormat = "tree" | "json";
@@ -542,12 +544,37 @@ export class DuplicatesUsecase {
 
       // Only include if there are multiple instances or showAll is true
       if (instanceIds.length > 1 || showAll) {
+        const hasIgnoreFilter =
+          (options.ignoreProjects && options.ignoreProjects.length > 0) ||
+          (options.ignorePackageProjects &&
+            options.ignorePackageProjects.length > 0);
+
         const instances = await Promise.all(
           instanceIds.map(async (id) => {
             const instance = instancesMap.get(id)!;
 
             // Use projects from tree-based collection (only actually resolved packages)
             let allImporters = Array.from(instance.projects);
+
+            // Apply ignore projects filter
+            if (options.ignoreProjects && options.ignoreProjects.length > 0) {
+              allImporters = allImporters.filter(
+                (imp) => !options.ignoreProjects!.includes(imp),
+              );
+            }
+            // Apply ignore package+project pairs
+            if (
+              options.ignorePackageProjects &&
+              options.ignorePackageProjects.length > 0
+            ) {
+              allImporters = allImporters.filter(
+                (imp) =>
+                  !options.ignorePackageProjects!.some(
+                    (pair) =>
+                      pair.project === imp && pair.package === packageName,
+                  ),
+              );
+            }
 
             // Apply project filter if specified
             if (projectFilter) {
@@ -576,9 +603,10 @@ export class DuplicatesUsecase {
               id: instance.id,
               version: instance.version,
               dependencies: instance.dependencies,
-              projects: projectFilter
-                ? allImporters
-                : Array.from(instance.projects),
+              projects:
+                projectFilter || hasIgnoreFilter
+                  ? allImporters
+                  : Array.from(instance.projects),
               dependencyType: this.getDependencyType(packageName, allImporters),
               dependencyInfo: undefined, // Will be computed lazily if needed
             };
@@ -631,11 +659,12 @@ export class DuplicatesUsecase {
           });
         }
 
-        // When project filter is applied, check duplicates based on filtered results
+        // When project/ignore filter is applied, check duplicates based on filtered results
         // Otherwise check based on original instance count
-        const isDuplicate = projectFilter
-          ? filteredInstances.length > 1
-          : instanceIds.length > 1;
+        const isDuplicate =
+          projectFilter || hasIgnoreFilter
+            ? filteredInstances.length > 1
+            : instanceIds.length > 1;
 
         // Check if there's a hoist conflict even without lockfile duplicates
         let hasHoistConflict = false;
