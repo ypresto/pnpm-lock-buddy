@@ -1,9 +1,11 @@
 import { Command } from "commander";
+import { readFileSync, existsSync } from "fs";
 import { loadLockfile } from "../../core/lockfile.js";
 import {
   DuplicatesUsecase,
   type OutputFormat,
 } from "../../usecases/duplicates.usecase.js";
+import { parseIgnoreFile } from "../../core/ignore-file.js";
 import chalk from "chalk";
 
 export function createDuplicatesCommand(): Command {
@@ -59,6 +61,10 @@ export function createDuplicatesCommand(): Command {
       "Path to node_modules directory (for --hoist)",
       "node_modules",
     )
+    .option(
+      "--ignore-file <path>",
+      "Path to ignore file listing projects or package+project pairs to suppress",
+    )
     .option("-o, --output <format>", "Output format: tree, json", "tree")
     .action(async (packageNames: string[], options) => {
       try {
@@ -111,6 +117,28 @@ export function createDuplicatesCommand(): Command {
           }
         }
 
+        // Parse ignore file if specified
+        let ignoreProjects: string[] | undefined;
+        let ignorePackageProjects:
+          | Array<{ project: string; package: string }>
+          | undefined;
+        if (options.ignoreFile) {
+          if (!existsSync(options.ignoreFile)) {
+            console.error(
+              chalk.red(`Error: Ignore file not found: ${options.ignoreFile}`),
+            );
+            process.exit(1);
+          }
+          const content = readFileSync(options.ignoreFile, "utf-8");
+          const parsed = parseIgnoreFile(content);
+          if (parsed.projects.length > 0) {
+            ignoreProjects = parsed.projects;
+          }
+          if (parsed.packageProjects.length > 0) {
+            ignorePackageProjects = parsed.packageProjects;
+          }
+        }
+
         // Check if non-wildcard packages exist
         if (packageNames.length > 0) {
           const nonWildcardNames = packageNames.filter(
@@ -146,6 +174,8 @@ export function createDuplicatesCommand(): Command {
             projectFilter: projectFilter,
             omitTypes: omitTypes,
             printStorePath,
+            ignoreProjects,
+            ignorePackageProjects,
           });
 
           // Check if any package has file variants or multiple resolution contexts
@@ -189,6 +219,8 @@ export function createDuplicatesCommand(): Command {
               checkHoist: options.hoist,
               modulesDir: options.modulesDir,
               printStorePath,
+              ignoreProjects,
+              ignorePackageProjects,
             });
 
           hasDuplicates = perProjectDuplicates.length > 0;
@@ -251,6 +283,8 @@ export function createDuplicatesCommand(): Command {
             checkHoist: options.hoist,
             modulesDir: options.modulesDir,
             printStorePath,
+            ignoreProjects,
+            ignorePackageProjects,
           });
 
           hasDuplicates = duplicates.length > 0;
