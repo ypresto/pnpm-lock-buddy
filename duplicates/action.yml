@@ -1,0 +1,71 @@
+name: 'pnpm-lock-buddy/duplicates'
+description: 'Detect duplicate package instances in pnpm-lock.yaml'
+branding:
+  icon: 'search'
+  color: 'orange'
+
+inputs:
+  packages:
+    description: 'Space-separated package names to check for duplicates (supports wildcards)'
+    required: true
+  per-project:
+    description: 'Group duplicates by project (--per-project)'
+    required: false
+    default: 'true'
+  deps:
+    description: 'Show dependency tree paths (--deps)'
+    required: false
+    default: 'false'
+  omit:
+    description: 'Dependency types to omit, space-separated (e.g., "dev optional")'
+    required: false
+    default: ''
+  lockfile:
+    description: 'Path to pnpm-lock.yaml file'
+    required: false
+    default: ''
+  ignore-file:
+    description: 'Path to ignore file listing projects or package+project pairs to suppress'
+    required: false
+    default: '.pnpm-lock-buddy-ignore'
+  comment:
+    description: 'Post results as a collapsible PR comment (requires pull_request trigger and GITHUB_TOKEN)'
+    required: false
+    default: 'true'
+  max-old-space-size:
+    description: 'Node.js max-old-space-size in MB'
+    required: false
+    default: '8192'
+  version:
+    description: 'pnpm-lock-buddy version to use (default: version from this action)'
+    required: false
+    default: ''
+  extra-args:
+    description: 'Additional CLI arguments passed directly to the command'
+    required: false
+    default: ''
+
+outputs:
+  has-duplicates:
+    description: 'Whether duplicates were found ("true" or "false")'
+    value: ${{ steps.run.outputs.has-duplicates }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run pnpm-lock-buddy duplicates
+      id: run
+      shell: bash
+      env:
+        INPUT_PACKAGES: ${{ inputs.packages }}
+        INPUT_PER_PROJECT: ${{ inputs.per-project }}
+        INPUT_DEPS: ${{ inputs.deps }}
+        INPUT_OMIT: ${{ inputs.omit }}
+        INPUT_LOCKFILE: ${{ inputs.lockfile }}
+        INPUT_IGNORE_FILE: ${{ inputs.ignore-file }}
+        INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_MAX_OLD_SPACE_SIZE: ${{ inputs.max-old-space-size }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "${{ github.action_path }}/run.sh"
