@@ -868,6 +868,49 @@ describe("DependencyTracker", () => {
         );
       });
     });
+
+    // Regression: getDependencyPath must distinguish between two instances of the
+    // same package with different peer dep resolutions. Before the fix,
+    // findPathInTree used a loose startsWith match that returned the first node
+    // with matching name@version, ignoring the peer dep context.
+    describe("peer dep duplicate path resolution", () => {
+      it("should return correct path for each peer dep variant of the same package", async () => {
+        const yaml = await import("js-yaml");
+        const fs = await import("fs");
+        const path = await import("path");
+
+        const fixturePath = path.join(
+          __dirname,
+          "../../fixtures/peer-dep-duplicate-paths.yaml",
+        );
+        const fixtureContent = fs.readFileSync(fixturePath, "utf-8");
+        const lockfile = yaml.load(fixtureContent) as PnpmLockfile;
+
+        const tracker = new DependencyTracker(fixturePath);
+
+        // Instance [1]: shared-lib@1.0.0(db-driver@1.0.0) — direct dep of apps/my-app
+        const path1 = await tracker.getDependencyPath(
+          "apps/my-app",
+          "shared-lib@1.0.0(db-driver@1.0.0)",
+        );
+        expect(path1.length).toBeGreaterThanOrEqual(1);
+        const lastStep1 = path1[path1.length - 1]!;
+        expect(lastStep1.package).toContain("shared-lib");
+        expect(lastStep1.package).toContain("db-driver@1.0.0");
+        expect(lastStep1.package).not.toContain("db-driver@2.0.0");
+
+        // Instance [2]: shared-lib@1.0.0(db-driver@2.0.0) — via linked toolkit
+        const path2 = await tracker.getDependencyPath(
+          "apps/my-app",
+          "shared-lib@1.0.0(db-driver@2.0.0)",
+        );
+        expect(path2.length).toBeGreaterThanOrEqual(1);
+        const lastStep2 = path2[path2.length - 1]!;
+        expect(lastStep2.package).toContain("shared-lib");
+        expect(lastStep2.package).toContain("db-driver@2.0.0");
+        expect(lastStep2.package).not.toContain("db-driver@1.0.0");
+      });
+    });
   });
 
   describe("non-injected workspace dependencies with version conflicts", () => {
