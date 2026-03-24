@@ -1,0 +1,52 @@
+lockfileVersion: '9.0'
+
+# Reproduces the drizzle-orm scenario: same package (shared-lib) has two instances
+# with different peer dep resolutions (db-driver@1.0.0 vs db-driver@2.0.0).
+# getDependencyPath must return the correct path for each instance.
+
+importers:
+  apps/my-app:
+    dependencies:
+      shared-lib:
+        specifier: 1.0.0
+        version: 1.0.0(db-driver@1.0.0)
+      toolkit:
+        specifier: workspace:*
+        version: link:../../packages/toolkit
+      db-driver:
+        specifier: 1.0.0
+        version: 1.0.0
+
+  packages/toolkit:
+    dependencies:
+      shared-lib:
+        specifier: 1.0.0
+        version: 1.0.0(db-driver@2.0.0)
+      db-driver:
+        specifier: 2.0.0
+        version: 2.0.0
+
+packages:
+  'shared-lib@1.0.0':
+    resolution: {integrity: sha512-shared}
+    peerDependencies:
+      db-driver: '*'
+
+  'db-driver@1.0.0':
+    resolution: {integrity: sha512-db1}
+
+  'db-driver@2.0.0':
+    resolution: {integrity: sha512-db2}
+
+snapshots:
+  'shared-lib@1.0.0(db-driver@1.0.0)':
+    dependencies:
+      db-driver: 1.0.0
+
+  'shared-lib@1.0.0(db-driver@2.0.0)':
+    dependencies:
+      db-driver: 2.0.0
+
+  'db-driver@1.0.0': {}
+
+  'db-driver@2.0.0': {}

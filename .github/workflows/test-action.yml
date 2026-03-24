@@ -1,0 +1,54 @@
+name: Test duplicates action
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test-action:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Test: should detect duplicates and fail
+      - name: Run duplicates check (expect duplicates)
+        id: duplicates
+        uses: ./duplicates
+        continue-on-error: true
+        with:
+          packages: '@pnpm/types @pnpm/constants'
+          per-project: 'false'
+          comment: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+
+      - name: Verify duplicates were detected
+        shell: bash
+        run: |
+          if [ "${{ steps.duplicates.outputs.has-duplicates }}" != "true" ]; then
+            echo "::error::Expected has-duplicates=true but got ${{ steps.duplicates.outputs.has-duplicates }}"
+            exit 1
+          fi
+          echo "Action correctly detected duplicates"
+
+      # Test: should pass with no duplicates for a non-existent-in-lockfile filter
+      - name: Run duplicates check (expect no duplicates)
+        id: no-duplicates
+        uses: ./duplicates
+        with:
+          packages: 'commander'
+          per-project: 'false'
+
+      - name: Verify no duplicates
+        shell: bash
+        run: |
+          if [ "${{ steps.no-duplicates.outputs.has-duplicates }}" != "false" ]; then
+            echo "::error::Expected has-duplicates=false but got ${{ steps.no-duplicates.outputs.has-duplicates }}"
+            exit 1
+          fi
+          echo "Action correctly reported no duplicates"

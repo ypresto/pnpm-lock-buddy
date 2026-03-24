@@ -48,6 +48,45 @@ next-navigation-guard:
 
 Both instances are `0.1.2`, but resolved with different `@babel/core` versions (`7.27.7` vs `7.28.6`), causing `next` to be instantiated twice and breaking `NavigationGuardProvider`.
 
+## GitHub Action
+
+Use `ypresto/pnpm-lock-buddy/duplicates@v1` to check for duplicates in CI:
+
+```yaml
+- uses: ypresto/pnpm-lock-buddy/duplicates@v1
+  with:
+    packages: 'next react react-dom @types/react'
+```
+
+The step fails if duplicates are found. Set `comment: 'true'` to post results as a collapsible PR comment.
+
+### Action Inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `packages` | (required) | Space-separated package names (supports wildcards) |
+| `per-project` | `true` | Group duplicates by project |
+| `deps` | `false` | Show dependency tree paths |
+| `omit` | | Dependency types to omit (e.g., `dev optional`) |
+| `lockfile` | | Path to pnpm-lock.yaml |
+| `ignore-file` | `.pnpm-lock-buddy-ignore` | Path to ignore file |
+| `comment` | `false` | Post results as a collapsible PR comment (needs `pull-requests: write`) |
+| `max-old-space-size` | `8192` | Node.js heap size in MB |
+| `version` | (bundled) | pnpm-lock-buddy version |
+| `extra-args` | | Additional CLI arguments |
+
+### Ignore File
+
+Create `.pnpm-lock-buddy-ignore` to suppress known-acceptable duplicates:
+
+```
+# Ignore all duplicates in a project
+apps/storybook
+
+# Ignore specific package in a project
+apps/web:@types/react
+```
+
 ## Options
 
 ```
@@ -60,6 +99,7 @@ Both instances are `0.1.2`, but resolved with different `@babel/core` versions (
 --depth <number>        Dependency tree build depth (default: 10)
 --omit <types...>       Omit: dev, optional, peer
 --ignore-dev            Shorthand for --omit dev
+--ignore-file <path>    Path to ignore file for suppressing results
 --print-store-path      Show pnpm store paths instead of lockfile keys
 --exit-code             Exit 1 if duplicates found (for CI/CD)
 -o, --output <format>   Output format: tree, json
