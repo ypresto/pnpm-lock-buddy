@@ -55,7 +55,11 @@ Use `ypresto/pnpm-lock-buddy/duplicates@v1` to check for duplicates in CI:
 ```yaml
 - uses: ypresto/pnpm-lock-buddy/duplicates@v1
   with:
-    packages: 'next react react-dom @types/react'
+    packages: |
+      next
+      react
+      react-dom
+      @types/react
 ```
 
 The step fails if duplicates are found. Set `comment: 'true'` to post results as a collapsible PR comment.
