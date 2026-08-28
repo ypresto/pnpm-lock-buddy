@@ -460,10 +460,15 @@ export class DependencyTracker {
       if (version.startsWith("link:")) {
         const resolvedImporter = this.resolveLinkPath(importerId, version);
         if (resolvedImporter && lockfile.importers?.[resolvedImporter]) {
+          // Share the visited set with sibling branches. Copying it per branch
+          // makes every reachable importer be re-expanded once per path
+          // through the workspace link graph, which is exponential in a
+          // diamond-shaped graph. The other two call sites (:561, :618)
+          // already share the set.
           const nestedNodes = this.buildLinkedDependencyNodes(
             resolvedImporter,
             lockfile,
-            new Set(visitedImporters),
+            visitedImporters,
           );
 
           // Create a link node that preserves the intermediate package in the tree
