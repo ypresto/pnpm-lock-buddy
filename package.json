@@ -38,6 +38,7 @@
     "test": "vitest --no-watch",
     "test:watch": "vitest watch",
     "test:coverage": "vitest run --coverage",
+    "bench": "NODE_OPTIONS=--expose-gc vitest run test/bench",
     "lint": "eslint src test --ext .ts",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "typecheck": "tsc --noEmit"
