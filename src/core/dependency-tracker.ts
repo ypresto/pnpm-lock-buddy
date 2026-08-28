@@ -25,6 +25,8 @@ export class DependencyTracker {
   private importerCache = new Map<string, string[]>(); // packageId -> importers (cached)
   private linkedDependencies = new Map<string, LinkedDependencyInfo[]>(); // importer -> linked deps
   private allPathsCache = new Map<string, DependencyPathStep[][]>(); // (importerPath, packageId) -> paths (cached)
+  private subtreeCache = new Map<string, PackageNode[] | undefined>(); // packageId -> shared transitive subtree
+  private subtreeContextDependent = false; // set while building a subtree that must not be cached
   private initPromise: Promise<void> | null = null;
   private printStorePath = false; // Show store paths instead of lockfile key format
 
@@ -529,11 +531,31 @@ export class DependencyTracker {
     visitedImporters?: Set<string>,
   ): PackageNode[] | undefined {
     const packageId = `${packageName}@${packageVersion}`;
-    if (visited.has(packageId)) return undefined;
+
+    // A subtree that is neither cut by a cycle nor contains a workspace
+    // reference is the same everywhere it appears, so it can be built once and
+    // shared. Without this, the whole reachable closure is rebuilt for every
+    // importer and every direct dependency that reaches it.
+    if (this.subtreeCache.has(packageId)) {
+      return this.subtreeCache.get(packageId);
+    }
+
+    if (visited.has(packageId)) {
+      // Cut by a cycle: the result depends on how we got here, so neither this
+      // subtree nor any of its ancestors may be cached.
+      this.subtreeContextDependent = true;
+      return undefined;
+    }
     visited.add(packageId);
 
     const snapshotData = lockfile.snapshots?.[packageId];
-    if (!snapshotData) return undefined;
+    if (!snapshotData) {
+      this.subtreeCache.set(packageId, undefined);
+      return undefined;
+    }
+
+    const outerContextDependent = this.subtreeContextDependent;
+    this.subtreeContextDependent = false;
 
     const childNodes: PackageNode[] = [];
 
@@ -552,6 +574,9 @@ export class DependencyTracker {
 
       // Handle link: dependencies in snapshots - create a node for the linked package
       if (versionStr.startsWith("link:")) {
+        // Expanding a workspace link depends on visitedImporters, so this
+        // subtree is context dependent.
+        this.subtreeContextDependent = true;
         const sourceImporter =
           this.extractImporterPathFromFileVersion(packageVersion) || ".";
         const resolvedImporter = this.resolveLinkPath(
@@ -609,6 +634,10 @@ export class DependencyTracker {
 
     // For injected workspace packages (file:), also include linked dependencies from the workspace importer
     if (packageVersion.startsWith("file:")) {
+      // Same as the link: branch - depends on visitedImporters. Injected
+      // packages are also the nodes enrichNodesWithLinkedDeps mutates in
+      // place, so they must never end up in a shared subtree.
+      this.subtreeContextDependent = true;
       const rawPath = this.extractImporterPathFromFileVersion(packageVersion);
       // The file: path might be relative - need to find the actual importer key
       const importerPath = rawPath
@@ -629,7 +658,16 @@ export class DependencyTracker {
       }
     }
 
-    return childNodes.length > 0 ? childNodes : undefined;
+    const result = childNodes.length > 0 ? childNodes : undefined;
+
+    if (!this.subtreeContextDependent) {
+      this.subtreeCache.set(packageId, result);
+    }
+    // A context dependent child makes this subtree context dependent too.
+    this.subtreeContextDependent =
+      outerContextDependent || this.subtreeContextDependent;
+
+    return result;
   }
 
   /**
@@ -687,7 +725,10 @@ export class DependencyTracker {
     this.dependencyMap = new Map();
 
     for (const [importerId, tree] of Object.entries(this.dependencyTrees)) {
-      this.traverseTreeAndBuildMap(tree, importerId);
+      // Fresh per importer: the map records which importers reach a package,
+      // so a node visited under one importer must still be walked under
+      // another.
+      this.traverseTreeAndBuildMap(tree, importerId, new Set());
     }
   }
 
@@ -697,8 +738,17 @@ export class DependencyTracker {
   private traverseTreeAndBuildMap(
     nodes: PackageNode[],
     importerId: string,
+    visited: Set<PackageNode>,
   ): void {
     for (const node of nodes) {
+      // Subtrees are shared, so the trees are DAGs. Without an identity check
+      // this walks every distinct path instead of every node, which is
+      // exponential in a diamond-shaped dependency graph.
+      if (visited.has(node)) {
+        continue;
+      }
+      visited.add(node);
+
       const packageId = `${node.name}@${node.version}`;
 
       if (!this.dependencyMap.has(packageId)) {
@@ -722,7 +772,7 @@ export class DependencyTracker {
           this.dependencyMap.get(childId)!.directDependents.add(packageId);
         }
 
-        this.traverseTreeAndBuildMap(node.dependencies, importerId);
+        this.traverseTreeAndBuildMap(node.dependencies, importerId, visited);
       }
     }
   }
@@ -892,7 +942,14 @@ export class DependencyTracker {
       throw new Error(`No dependency tree found for importer: ${importerPath}`);
     }
 
-    const path = this.findPathInTree(tree, packageId, [], new Set(), 0);
+    const path = this.findPathInTree(
+      tree,
+      packageId,
+      [],
+      new Set(),
+      0,
+      this.collectNodesReachingTarget(tree, packageId),
+    );
 
     if (!path) {
       throw new Error(
@@ -990,18 +1047,113 @@ export class DependencyTracker {
   /**
    * Find path to target package in tree
    */
+  /**
+   * Whether a node could satisfy the target id, using the same exact and loose
+   * rules as the path searches. Used to prune subtrees before searching.
+   */
+  private nodeMatchesTarget(
+    node: PackageNode,
+    targetPackageId: string,
+  ): boolean {
+    const nodeId = `${node.name}@${node.version}`;
+    if (
+      nodeId === targetPackageId ||
+      this.extractInstanceIdFromPath(node) === targetPackageId
+    ) {
+      return true;
+    }
+
+    const displayId = this.getDisplayId(node);
+    if (displayId === targetPackageId) {
+      return true;
+    }
+
+    // Loose match: same name@version but the peer dep context is unresolved
+    return (
+      displayId === nodeId &&
+      (targetPackageId.startsWith(nodeId + "_") ||
+        targetPackageId.startsWith(nodeId + "("))
+    );
+  }
+
+  /**
+   * Nodes from which the target is reachable, including the matching nodes
+   * themselves.
+   *
+   * Shared subtrees make the trees DAGs, where the number of paths is
+   * exponential in the depth while the number of nodes stays linear. Walking
+   * paths without pruning therefore explodes, and a target that is absent
+   * makes the search enumerate the entire path space before returning nothing.
+   * This is computed once per search in O(nodes + edges).
+   */
+  private collectNodesReachingTarget(
+    roots: PackageNode[],
+    targetPackageId: string,
+  ): Set<PackageNode> {
+    const reaching = new Set<PackageNode>();
+    const resolved = new Map<PackageNode, boolean>();
+    const inProgress = new Set<PackageNode>();
+
+    const visit = (node: PackageNode): boolean => {
+      const memo = resolved.get(node);
+      if (memo !== undefined) {
+        return memo;
+      }
+      if (inProgress.has(node)) {
+        // Cycle: the ancestor that opened it resolves the answer.
+        return false;
+      }
+
+      inProgress.add(node);
+      let result = this.nodeMatchesTarget(node, targetPackageId);
+      let sawCycle = false;
+      for (const child of node.dependencies ?? []) {
+        if (inProgress.has(child)) {
+          sawCycle = true;
+          continue;
+        }
+        if (visit(child)) {
+          result = true;
+        }
+      }
+      inProgress.delete(node);
+
+      // A negative answer that depended on an unresolved cycle is not safe to
+      // memoize; a positive one always is.
+      if (result || !sawCycle) {
+        resolved.set(node, result);
+      }
+      if (result) {
+        reaching.add(node);
+      }
+      return result;
+    };
+
+    for (const node of roots) {
+      visit(node);
+    }
+
+    return reaching;
+  }
+
   private findPathInTree(
     nodes: PackageNode[],
     targetPackageId: string,
     currentPath: DependencyPathStep[],
     visitedNodeIds: Set<string>,
     depth: number,
+    reaching: Set<PackageNode>,
   ): DependencyPathStep[] | null {
     // Depth limit to prevent stack overflow even with cycles
     if (depth > 100) {
       return null;
     }
     for (const node of nodes) {
+      // Neither this node nor anything below it can reach the target.
+      if (!reaching.has(node)) {
+        continue;
+      }
+
       const nodeId = `${node.name}@${node.version}`;
       // Also get the path-based ID for matching with peer dep context
       const pathBasedId = this.extractInstanceIdFromPath(node);
@@ -1055,6 +1207,7 @@ export class DependencyTracker {
           newPath,
           visitedNodeIds,
           depth + 1,
+          reaching,
         );
 
         if (childPath) {
@@ -1101,7 +1254,16 @@ export class DependencyTracker {
     }
 
     const paths: DependencyPathStep[][] = [];
-    this.findAllPathsInTree(tree, packageId, [], new Set(), 0, paths, maxPaths);
+    this.findAllPathsInTree(
+      tree,
+      packageId,
+      [],
+      new Set(),
+      0,
+      paths,
+      maxPaths,
+      this.collectNodesReachingTarget(tree, packageId),
+    );
 
     // Cache the result
     this.allPathsCache.set(cacheKey, paths);
@@ -1121,7 +1283,8 @@ export class DependencyTracker {
     visitedNodeIds: Set<string>,
     depth: number,
     paths: DependencyPathStep[][],
-    maxPaths: number = 10,
+    maxPaths: number,
+    reaching: Set<PackageNode>,
   ): boolean {
     // Depth limit to prevent deep recursion and improve performance
     // Reduced to 50 for faster search when finding allPaths
@@ -1135,6 +1298,11 @@ export class DependencyTracker {
     }
 
     for (const node of nodes) {
+      // Neither this node nor anything below it can reach the target.
+      if (!reaching.has(node)) {
+        continue;
+      }
+
       const nodeId = `${node.name}@${node.version}`;
       // Also get the path-based ID for matching with peer dep context
       const pathBasedId = this.extractInstanceIdFromPath(node);
@@ -1193,6 +1361,7 @@ export class DependencyTracker {
           depth + 1,
           paths,
           maxPaths,
+          reaching,
         );
 
         // Remove after exploring this branch to allow node in other paths

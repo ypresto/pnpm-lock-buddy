@@ -4,6 +4,7 @@ import {
   buildSyntheticWorkspace,
   writeSyntheticLockfile,
   measureTrees,
+  libName,
   type SyntheticWorkspaceOptions,
 } from "./synthetic-lockfile";
 
@@ -38,7 +39,7 @@ async function buildTrees(
   };
 }
 
-const CHAIN_LENGTH = 20;
+const NPM_LAYERS = 20;
 
 describe("dependency tree build cost", () => {
   /**
@@ -57,12 +58,12 @@ describe("dependency tree build cost", () => {
     const shallow = await buildTrees("diamond-l3", {
       layers: 3,
       width: 3,
-      chainLength: CHAIN_LENGTH,
+      npmLayers: NPM_LAYERS,
     });
     const deep = await buildTrees("diamond-l6", {
       layers: 6,
       width: 3,
-      chainLength: CHAIN_LENGTH,
+      npmLayers: NPM_LAYERS,
     });
 
     const nodeGrowth = deep.distinctNodes / shallow.distinctNodes;
@@ -75,9 +76,106 @@ describe("dependency tree build cost", () => {
         `(importers ${importerGrowth.toFixed(1)}x, paths ${pathGrowth.toFixed(1)}x)`,
     );
 
-    // Must stay far below the path growth (27x) even with slack for the
-    // per-tree fan-out that improvement B has yet to remove.
-    expect(nodeGrowth).toBeLessThan(6);
+    // What remains is one link node per link edge per tree, i.e. roughly
+    // importers^2 * width - polynomial, not exponential. Measured 6.5x against
+    // the 27x path growth; 29.4x before the fix.
+    expect(nodeGrowth).toBeLessThan(10);
+  }, 120_000);
+
+  /**
+   * Every workspace package pulls in the same npm chain. Rebuilding that chain
+   * per importer is the O(importers x deps x closure) factor; sharing it makes
+   * the retained node count independent of the importer count.
+   *
+   * Measured before the fix: 1230 nodes for 31 importers x a 20 package chain.
+   */
+  it("shares an npm subtree across importers instead of rebuilding it", async () => {
+    const flat = await buildTrees("flat-w30", {
+      layers: 1,
+      width: 30,
+      npmLayers: NPM_LAYERS,
+    });
+
+    console.table([flat]);
+
+    // One node per link plus one per importer-local head of the chain, and the
+    // chain itself shared once: far below importers * npmLayers.
+    expect(flat.distinctNodes).toBeLessThan(200);
+  }, 120_000);
+
+  /**
+   * Building the dependency map walks the trees. Once subtrees are shared the
+   * trees are DAGs, so a walk without an identity-visited set follows every
+   * distinct path and goes exponential.
+   */
+  it("builds the dependency map without walking every path", async () => {
+    const workspace = buildSyntheticWorkspace({
+      layers: 10,
+      width: 3,
+      npmLayers: NPM_LAYERS,
+    });
+    const lockfilePath = writeSyntheticLockfile(workspace.lockfile, "map-l10");
+    const tracker = new DependencyTracker(lockfilePath);
+
+    const start = performance.now();
+    const importers = await tracker.getImportersForPackage(
+      `${libName(NPM_LAYERS - 1, 0)}@1.0.0`,
+    );
+    const ms = performance.now() - start;
+
+    console.log(
+      `map build over ${workspace.importerCount} importers ` +
+        `(${workspace.linkPathCount} link paths): ${Math.round(ms)}ms`,
+    );
+
+    expect(importers).toContain(".");
+    expect(importers).toHaveLength(workspace.importerCount);
+    // Generous: a path-count walk over 3^10 paths takes tens of seconds.
+    expect(ms).toBeLessThan(2000);
+  }, 120_000);
+
+  /**
+   * With subtrees shared, the trees are DAGs: an npm graph where every package
+   * on a layer depends on every package on the next has 2^layers distinct
+   * paths but only 2*layers nodes. Anything that walks paths instead of nodes
+   * goes exponential here.
+   *
+   * Measured with shared subtrees but no pruning (131072 paths):
+   * map build 3679ms, search for an absent package 2075ms.
+   */
+  it("walks nodes rather than paths on a diamond-shaped npm graph", async () => {
+    const workspace = buildSyntheticWorkspace({
+      layers: 1,
+      width: 2,
+      npmLayers: 18,
+      npmWidth: 2,
+    });
+    const lockfilePath = writeSyntheticLockfile(workspace.lockfile, "npm-dia");
+    const tracker = new DependencyTracker(lockfilePath);
+
+    const trees = await tracker.getDependencyTrees();
+    const nodes = measureTrees(trees).distinctNodes;
+
+    let start = performance.now();
+    const importers = await tracker.getImportersForPackage(
+      `${libName(17, 0)}@1.0.0`,
+    );
+    const mapMs = performance.now() - start;
+
+    start = performance.now();
+    const absent = await tracker.getAllDependencyPaths(".", "absent@1.0.0");
+    const searchMs = performance.now() - start;
+
+    console.log(
+      `npm paths ${workspace.npmPathCount}, nodes ${nodes}, ` +
+        `map ${Math.round(mapMs)}ms, absent-target search ${Math.round(searchMs)}ms`,
+    );
+
+    expect(importers).toContain(".");
+    expect(absent).toEqual([]);
+    expect(nodes).toBeLessThan(200);
+    expect(mapMs).toBeLessThan(500);
+    expect(searchMs).toBeLessThan(500);
   }, 120_000);
 
   it("reports the cost profile across shapes", async () => {
@@ -87,7 +185,7 @@ describe("dependency tree build cost", () => {
         await buildTrees(`diamond-l${layers}`, {
           layers,
           width: 3,
-          chainLength: CHAIN_LENGTH,
+          npmLayers: NPM_LAYERS,
         }),
       );
     }
@@ -96,14 +194,14 @@ describe("dependency tree build cost", () => {
       await buildTrees("chain-l8w1", {
         layers: 8,
         width: 1,
-        chainLength: CHAIN_LENGTH,
+        npmLayers: NPM_LAYERS,
       }),
     );
     rows.push(
       await buildTrees("diamond-l4w2", {
         layers: 4,
         width: 2,
-        chainLength: CHAIN_LENGTH,
+        npmLayers: NPM_LAYERS,
       }),
     );
     // Flat workspace: every importer pulls the same npm closure.
@@ -111,7 +209,7 @@ describe("dependency tree build cost", () => {
       await buildTrees("flat-w30", {
         layers: 1,
         width: 30,
-        chainLength: CHAIN_LENGTH,
+        npmLayers: NPM_LAYERS,
       }),
     );
 

@@ -26,8 +26,10 @@ export interface SyntheticWorkspaceOptions {
   layers: number;
   /** Number of workspace packages per layer. */
   width: number;
-  /** Length of the npm dependency chain each workspace package pulls in. */
-  chainLength: number;
+  /** Depth of the npm dependency graph each workspace package pulls in. */
+  npmLayers: number;
+  /** Width of the npm dependency graph. 1 makes it a chain, >1 a diamond. */
+  npmWidth?: number;
   /**
    * Where the links to the next layer are declared.
    * "dev" mirrors the real-world shape (shared eslint-config / tsconfig /
@@ -44,6 +46,8 @@ export interface SyntheticWorkspace {
   packageCount: number;
   /** Root-to-leaf path count through the link graph (the blow-up factor). */
   linkPathCount: number;
+  /** Root-to-leaf path count through the npm dependency graph. */
+  npmPathCount: number;
 }
 
 function importerId(layer: number, index: number): string {
@@ -54,21 +58,35 @@ function importerName(layer: number, index: number): string {
   return `@w/l${layer}p${index}`;
 }
 
+/** Package name on layer `depth` of the npm dependency graph. */
+export function libName(depth: number, index: number): string {
+  return `lib${depth}p${index}`;
+}
+
 export function buildSyntheticWorkspace(
   options: SyntheticWorkspaceOptions,
 ): SyntheticWorkspace {
-  const { layers, width, chainLength, linkKind = "dev" } = options;
+  const { layers, width, npmLayers, npmWidth = 1, linkKind = "dev" } = options;
 
   const importers: PnpmLockfile["importers"] = {};
   const packages: PnpmLockfile["packages"] = {};
   const snapshots: PnpmLockfile["snapshots"] = {};
 
-  // Shared npm dependency chain: lib0 -> lib1 -> ... -> lib{chainLength-1}
-  for (let i = 0; i < chainLength; i++) {
-    const id = `lib${i}@1.0.0`;
-    packages[id] = { resolution: { integrity: `sha512-lib${i}` } };
-    snapshots[id] =
-      i + 1 < chainLength ? { dependencies: { [`lib${i + 1}`]: "1.0.0" } } : {};
+  // Shared npm dependency graph: every lib on layer d depends on every lib on
+  // layer d+1, so npmWidth > 1 makes the number of paths npmWidth^npmLayers
+  // while the number of packages stays npmLayers * npmWidth.
+  for (let d = 0; d < npmLayers; d++) {
+    for (let i = 0; i < npmWidth; i++) {
+      const id = `${libName(d, i)}@1.0.0`;
+      const deps: Record<string, string> = {};
+      if (d + 1 < npmLayers) {
+        for (let next = 0; next < npmWidth; next++) {
+          deps[libName(d + 1, next)] = "1.0.0";
+        }
+      }
+      packages[id] = { resolution: { integrity: `sha512-${libName(d, i)}` } };
+      snapshots[id] = d + 1 < npmLayers ? { dependencies: deps } : {};
+    }
   }
 
   const rootLinks: Record<string, { specifier: string; version: string }> = {};
@@ -92,7 +110,11 @@ export function buildSyntheticWorkspace(
         }
       }
 
-      const npmDeps = { lib0: { specifier: "1.0.0", version: "1.0.0" } };
+      const npmDeps: Record<string, { specifier: string; version: string }> =
+        {};
+      for (let i = 0; i < npmWidth; i++) {
+        npmDeps[libName(0, i)] = { specifier: "1.0.0", version: "1.0.0" };
+      }
 
       importers[importerId(layer, index)] =
         linkKind === "dev"
@@ -104,8 +126,9 @@ export function buildSyntheticWorkspace(
   return {
     lockfile: { lockfileVersion: "9.0", importers, packages, snapshots },
     importerCount: layers * width + 1,
-    packageCount: chainLength,
+    packageCount: npmLayers * npmWidth,
     linkPathCount: Math.pow(width, layers),
+    npmPathCount: Math.pow(npmWidth, npmLayers - 1),
   };
 }
 

@@ -597,6 +597,70 @@ describe("DependencyTracker", () => {
         expect((error as Error).message).toContain("No dependency tree found");
       }
     });
+
+    it("should expand a shared package the same way under every parent", async () => {
+      // pkg-a depends on both x and y, and both depend on shared@1.0.0.
+      // On disk there is one shared@1.0.0 with leaf@2.0.0 under it, reachable
+      // through either parent, so both parents must show the same subtree.
+      const sharedSubtreeLockfile: PnpmLockfile = {
+        lockfileVersion: "9.0",
+        importers: {
+          ".": {
+            dependencies: {
+              "pkg-a": { specifier: "1.0.0", version: "1.0.0" },
+            },
+          },
+        },
+        packages: {
+          "pkg-a@1.0.0": { resolution: { integrity: "sha512-a" } },
+          "x@1.0.0": { resolution: { integrity: "sha512-x" } },
+          "y@1.0.0": { resolution: { integrity: "sha512-y" } },
+          "shared@1.0.0": { resolution: { integrity: "sha512-s" } },
+          "leaf@2.0.0": { resolution: { integrity: "sha512-l" } },
+        },
+        snapshots: {
+          "pkg-a@1.0.0": { dependencies: { x: "1.0.0", y: "1.0.0" } },
+          "x@1.0.0": { dependencies: { shared: "1.0.0" } },
+          "y@1.0.0": { dependencies: { shared: "1.0.0" } },
+          "shared@1.0.0": { dependencies: { leaf: "2.0.0" } },
+          "leaf@2.0.0": {},
+        },
+      };
+
+      const lockfilePath = writeMockLockfile(sharedSubtreeLockfile);
+      const tracker = new DependencyTracker(lockfilePath);
+
+      const trees = await tracker.getDependencyTrees();
+      const pkgA = trees["."]?.find((node) => node.name === "pkg-a");
+      const viaX = pkgA?.dependencies?.find((node) => node.name === "x");
+      const viaY = pkgA?.dependencies?.find((node) => node.name === "y");
+
+      const sharedUnderX = viaX?.dependencies?.find(
+        (node) => node.name === "shared",
+      );
+      const sharedUnderY = viaY?.dependencies?.find(
+        (node) => node.name === "shared",
+      );
+
+      expect(sharedUnderX?.dependencies?.map((node) => node.name)).toEqual([
+        "leaf",
+      ]);
+      expect(sharedUnderY?.dependencies?.map((node) => node.name)).toEqual([
+        "leaf",
+      ]);
+      // The transitive subtree is built once and shared between the two
+      // parents rather than rebuilt for each.
+      expect(sharedUnderX?.dependencies).toBe(sharedUnderY?.dependencies);
+
+      // Both routes to leaf are real, so both are reported.
+      const paths = await tracker.getAllDependencyPaths(".", "leaf@2.0.0");
+      expect(
+        paths.map((steps) => steps.map((step) => step.package).join(" > ")),
+      ).toEqual([
+        "pkg-a@1.0.0 > x@1.0.0 > shared@1.0.0 > leaf@2.0.0",
+        "pkg-a@1.0.0 > y@1.0.0 > shared@1.0.0 > leaf@2.0.0",
+      ]);
+    });
   });
 
   describe.skip("transitive dependency path tracing", () => {
