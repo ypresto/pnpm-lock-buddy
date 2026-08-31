@@ -13,7 +13,7 @@
   },
   "homepage": "https://github.com/ypresto/pnpm-lock-buddy",
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=22.13.0"
   },
   "keywords": [
     "pnpm",
