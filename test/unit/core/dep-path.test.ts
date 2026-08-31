@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { depPathToFilename } from "@pnpm/deps.path";
-import { resolveStorePathToLockfileKey } from "../../../src/core/dep-path";
+import {
+  resolveStorePathToLockfileKey,
+  linkNodeIdentity,
+} from "../../../src/core/dep-path";
 
 describe("resolveStorePathToLockfileKey", () => {
   // Real snapshot keys from layerone pnpm-lock.yaml before b3b4838 fix commit.
@@ -151,5 +154,36 @@ describe("resolveStorePathToLockfileKey", () => {
     expect(
       resolveStorePathToLockfileKey("react", "react@19.2.4", [v1, v2]),
     ).toBe(v2);
+  });
+});
+
+describe("linkNodeIdentity", () => {
+  // Regression: the same linked project reached at different relative
+  // depths (link:../eslint-plugin vs link:../../packages/shared/eslint-plugin)
+  // was reported as two "duplicate" instances of one physical package,
+  // because the fallback identity (used when there's no .pnpm store path)
+  // embedded the raw, depth-dependent `link:...` version string.
+  it("returns the same identity for the same link target reached at different relative depths", () => {
+    const shallow = linkNodeIdentity(
+      "link:../eslint-plugin",
+      "/repo/packages/shared/eslint-plugin",
+    );
+    const deep = linkNodeIdentity(
+      "link:../../packages/shared/eslint-plugin",
+      "/repo/packages/shared/eslint-plugin",
+    );
+
+    expect(shallow).toBe(deep);
+  });
+
+  it("distinguishes different link targets", () => {
+    const a = linkNodeIdentity("link:../a", "/repo/packages/a");
+    const b = linkNodeIdentity("link:../b", "/repo/packages/b");
+
+    expect(a).not.toBe(b);
+  });
+
+  it("passes through non-link versions unchanged", () => {
+    expect(linkNodeIdentity("18.2.0", "/store/react@18.2.0")).toBe("18.2.0");
   });
 });

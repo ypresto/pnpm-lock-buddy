@@ -16,7 +16,10 @@ import {
   type HoistedVersionInfo,
 } from "../core/modules-yaml.js";
 import path from "path";
-import { resolveStorePathToLockfileKey } from "../core/dep-path.js";
+import {
+  resolveStorePathToLockfileKey,
+  linkNodeIdentity,
+} from "../core/dep-path.js";
 
 export interface DuplicatesOptions {
   showAll?: boolean;
@@ -407,7 +410,7 @@ export class DuplicatesUsecase {
   private extractInstanceIdFromPath(node: DependencyNode): string {
     const storePath = this.extractStorePathFromNode(node);
     if (!storePath) {
-      return `${node.name}@${node.version}`;
+      return `${node.name}@${linkNodeIdentity(node.version, node.path)}`;
     }
 
     // If printStorePath is set, always return store path

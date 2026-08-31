@@ -186,3 +186,22 @@ export function resolveStorePathToLockfileKey(
 
   return versionMatches[0]!;
 }
+
+/**
+ * Identity string for a workspace `link:` dependency, for callers that need
+ * a stable per-package instance key and have no `.pnpm` store path to key
+ * off (link nodes resolve to a directory, not a store entry).
+ *
+ * The same linked project is reached with a different relative `link:...`
+ * specifier depending on how deep the requiring importer sits (e.g.
+ * `link:../eslint-plugin` from a nested package vs.
+ * `link:../../packages/shared/eslint-plugin` from a shallower one) — using
+ * `version` directly as the identity would report one physical package as
+ * multiple "duplicate" instances. `path` doesn't have that problem: it's
+ * either the link target's resolved absolute directory (real pnpm tree) or
+ * a name-derived placeholder (lockfile-only fallback tree) — stable either
+ * way regardless of which importer is asking.
+ */
+export function linkNodeIdentity(version: string, nodePath: string): string {
+  return version.startsWith("link:") ? `link:${nodePath}` : version;
+}
