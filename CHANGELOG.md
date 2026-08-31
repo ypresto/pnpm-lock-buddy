@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.0] - 2026-08-31
+
+### Added
+
+- Support for pnpm v11.25.0/v12.0.0's multi-document `pnpm-lock.yaml` format (an "env" document ahead of the project document, written when config dependencies or a pinned pnpm version are present). `loadLockfile` now reads every document and uses the last one, per pnpm's own guidance for dependency-graph consumers, and ignores a trailing empty document produced by a bare trailing `---` separator.
+- `list`/`search` command usage and a `duplicates`/`list` options reference to the README (previously undocumented).
+- `README.md`: pnpm v9-v12 compatibility notes, a known limitation for named-registry (`namedRegistries`) packages using registry-qualified snapshot keys, and a "Caveats" section clarifying that this tool's pnpm-v12 support is lockfile-*format* compatibility, not "runs the same engine code" (pnpm v12's Rust engine no longer uses the `@pnpm/*` JS packages this tool depends on; pnpm v11's TS CLI still does, verified directly against both CLIs' published bundles).
+
+### Changed
+
+- `@pnpm/dependency-path` → `@pnpm/deps.path` (same package, renamed upstream for the pnpm v11 generation; `depPathToFilename` usage is unchanged).
+- `@pnpm/lockfile.types`: `^1002.0.1` → `^1100.1.0`.
+- `@pnpm/reviewing.dependencies-hierarchy` → `@pnpm/deps.inspection.tree-builder` (renamed upstream; `buildDependenciesHierarchy`/`PackageNode` → `buildDependenciesTree`/`DependencyNode`).
+  - The renamed library no longer throws when `node_modules` is absent or minimal (a behavior change from the old library, discovered via existing test regressions): it now silently returns a partial tree containing only workspace-link chains, dropping every npm-resolved package. `DependencyTracker` now checks for a real virtual store (`node_modules/.pnpm` containing at least one resolved package directory) before trusting the library's result, falling back to lockfile-only tree construction otherwise.
+- `engines.node`: `>=14.0.0` → `>=22.13.0`, matching what the packages above actually require. CI (`test-action.yml`) now uses Node 22.
+- `@types/node`: `^20.10.0` → `^22.10.0`, matching the new `engines.node` floor.
+
+### Removed
+
+- `@pnpm/lockfile-file` dependency (unused).
+
 ## [0.2.4] - 2026-03-19
 
 ### Fixed
