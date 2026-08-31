@@ -56,19 +56,24 @@ projects that don't use `namedRegistries` are unaffected.
   ~135-project production monorepo** (real `node_modules` installed by pnpm
   v11.9.0, not a synthetic fixture) — synthetic test fixtures alone couldn't
   have caught what this found: `@pnpm/deps.inspection.tree-builder` bounds a
-  whole-workspace build to O(N) nodes by returning every repeat occurrence of
-  an already-expanded subtree as an empty `deduped: true` stub, a contract
-  this tool didn't originally know about and so treated as a childless leaf.
-  A first fix attempt (resolving each stub from another matching occurrence
-  found by resolved path) undercounted less but overcounted worse — it
-  attributed one project's dependencies to a different, unrelated project,
-  because the library's real cache key includes the remaining tree depth,
-  which isn't exposed on the public node shape a fix could match against.
-  This is being reworked to scope each project's tree build independently
-  (eliminating cross-project sharing entirely) rather than matched
-  heuristically; track this note for when that lands. If you hit
-  tree-related discrepancies on a large real monorepo we haven't tested
-  against, please open an issue.
+  tree build to O(N) nodes by returning every repeat occurrence of an
+  already-expanded subtree as an empty `deduped: true` stub, a contract this
+  tool didn't originally know about and so treated as a childless leaf. A
+  first fix attempt (resolving each stub from another matching occurrence
+  found by resolved path across a whole-workspace, all-projects-at-once tree
+  build) undercounted less but overcounted worse — it attributed one
+  project's dependencies to a different, unrelated project, because the
+  library's real cache key includes the remaining tree depth, which isn't
+  exposed on the public node shape a fix could match against. Fixed by
+  building each project's tree with its own independent call instead
+  (eliminating cross-project cache sharing structurally — confirmed directly
+  against the same monorepo, both at the raw library level and end to end);
+  this is the same pattern pnpm's own CLI falls back to for the cases it
+  can't share a single cache for. The trade-off is speed: on the test
+  monorepo this runs ~3x slower than a single shared-cache call would
+  (~40s vs. ~12s for the whole workspace) — a faster fix that preserves
+  correctness is being evaluated. If you hit tree-related discrepancies on a
+  large real monorepo we haven't tested against, please open an issue.
 
 ## Quick Start
 
