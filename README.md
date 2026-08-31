@@ -52,6 +52,17 @@ projects that don't use `namedRegistries` are unaffected.
   yet run this tool against a `node_modules` actually installed by the pnpm
   v12 CLI. If you hit an issue specifically on a v12-installed project,
   please open an issue.
+- **This tool's dependency-tree code path was verified against a real,
+  ~135-project production monorepo** (real `node_modules` installed by pnpm
+  v11.9.0, not a synthetic fixture) — synthetic test fixtures alone couldn't
+  have caught what this found: `@pnpm/deps.inspection.tree-builder` bounds a
+  whole-workspace build to O(N) nodes by returning every repeat occurrence of
+  an already-expanded subtree as an empty `deduped: true` stub, a contract
+  this tool didn't originally know about and so treated as a childless leaf —
+  41% of all nodes on that monorepo came back deduped, undercounting real
+  duplicates by more than half. Fixed (see `src/core/tree-dedup.ts`). If you
+  hit tree-related discrepancies on a large real monorepo we haven't tested
+  against, please open an issue.
 
 ## Quick Start
 
