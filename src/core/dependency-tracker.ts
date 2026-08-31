@@ -5,8 +5,9 @@ import type {
   LinkedDependencyInfo,
   PackageDependencyInfo,
 } from "./types.js";
-import { buildDependenciesHierarchy } from "@pnpm/reviewing.dependencies-hierarchy";
-import type { PackageNode } from "@pnpm/reviewing.dependencies-hierarchy";
+import { buildDependenciesTree } from "@pnpm/deps.inspection.tree-builder";
+import type { DependencyNode } from "@pnpm/deps.inspection.tree-builder";
+import fs from "fs";
 import path from "path";
 import { resolveStorePathToLockfileKey } from "./dep-path.js";
 
@@ -20,12 +21,12 @@ export class DependencyTracker {
   private depth: number;
   private lockfile: PnpmLockfile | null = null;
   private snapshotKeyIndex: Map<string, string[]> | null = null;
-  private dependencyTrees: Record<string, PackageNode[]> = {};
+  private dependencyTrees: Record<string, DependencyNode[]> = {};
   private dependencyMap = new Map<string, PackageDependencyInfo>();
   private importerCache = new Map<string, string[]>(); // packageId -> importers (cached)
   private linkedDependencies = new Map<string, LinkedDependencyInfo[]>(); // importer -> linked deps
   private allPathsCache = new Map<string, DependencyPathStep[][]>(); // (importerPath, packageId) -> paths (cached)
-  private subtreeCache = new Map<string, PackageNode[] | undefined>(); // packageId -> shared transitive subtree
+  private subtreeCache = new Map<string, DependencyNode[] | undefined>(); // packageId -> shared transitive subtree
   private subtreeContextDependent = false; // set while building a subtree that must not be cached
   private initPromise: Promise<void> | null = null;
   private printStorePath = false; // Show store paths instead of lockfile key format
@@ -114,12 +115,24 @@ export class DependencyTracker {
   }
 
   /**
-   * Build dependency trees using pnpm's buildDependenciesHierarchy
+   * Build dependency trees using pnpm's buildDependenciesTree
    */
   private async buildTreesFromPnpm(): Promise<void> {
+    // @pnpm/deps.inspection.tree-builder (unlike the @pnpm/reviewing.dependencies-hierarchy
+    // it replaces) can resolve workspace-link chains straight from the lockfile
+    // and does NOT throw when the virtual store is absent or empty: it
+    // silently returns a partial tree containing only those links, dropping
+    // every npm-resolved package. Detect that case up front instead of
+    // trusting totalNodes/throw, since a lockfile without a real install now
+    // "succeeds" with a non-empty, incomplete result.
+    if (!this.hasRealVirtualStore()) {
+      this.buildTreesFromLockfile();
+      return;
+    }
+
     try {
-      // Let buildDependenciesHierarchy auto-detect all projects from lockfile
-      const hierarchyResult = await buildDependenciesHierarchy(undefined, {
+      // Let buildDependenciesTree auto-detect all projects from lockfile
+      const hierarchyResult = await buildDependenciesTree(undefined, {
         depth: this.depth,
         lockfileDir: this.lockfileDir,
         virtualStoreDirMaxLength: 120,
@@ -133,7 +146,7 @@ export class DependencyTracker {
             ? "."
             : path.relative(this.lockfileDir, projectDir);
 
-        const allNodes: PackageNode[] = [
+        const allNodes: DependencyNode[] = [
           ...(hierarchy.dependencies || []),
           ...(hierarchy.devDependencies || []),
           ...(hierarchy.optionalDependencies || []),
@@ -161,6 +174,40 @@ export class DependencyTracker {
   }
 
   /**
+   * Whether the virtual store (node_modules/.pnpm) contains at least one
+   * resolved package directory, as opposed to being absent or containing
+   * only pnpm's own bookkeeping files (.modules.yaml, lock.yaml). A minimal
+   * or missing store is what mock/synthetic lockfiles in tests produce, and
+   * is also what a real project has before its first `pnpm install`.
+   */
+  private hasRealVirtualStore(): boolean {
+    const virtualStoreDir = path.join(
+      this.lockfileDir,
+      "node_modules",
+      ".pnpm",
+    );
+
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(virtualStoreDir);
+    } catch {
+      return false;
+    }
+
+    // Real resolved packages are always directories (e.g. `lodash@4.17.21`,
+    // `@scope+pkg@1.0.0`); pnpm's own bookkeeping files (`lock.yaml`, and
+    // occasionally a stray `modules.yaml`) are plain files.
+    return entries.some((entry) => {
+      if (entry.startsWith(".")) return false;
+      try {
+        return fs.statSync(path.join(virtualStoreDir, entry)).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  /**
    * Post-process trees built by pnpm to add dependencies from linked workspace packages
    * that may not be fully tracked in the filesystem-based tree
    */
@@ -178,10 +225,10 @@ export class DependencyTracker {
    * Recursively enrich nodes with dependencies from linked workspace packages
    */
   private enrichNodesWithLinkedDeps(
-    nodes: PackageNode[],
+    nodes: DependencyNode[],
     lockfile: PnpmLockfile,
     visitedImporters: Set<string>,
-    visitedNodes: Set<PackageNode> = new Set(),
+    visitedNodes: Set<DependencyNode> = new Set(),
   ): void {
     for (const node of nodes) {
       // Prevent re-processing the same node
@@ -237,7 +284,7 @@ export class DependencyTracker {
                 ) {
                   // For @file: packages, try to find the contextualized snapshot first
                   // to get the correct peer dependency resolutions
-                  let linkDeps: PackageNode[] | undefined;
+                  let linkDeps: DependencyNode[] | undefined;
 
                   // Look for a contextualized @file: version in the parent's snapshot dependencies
                   const parentSnapshotKey = `${node.name}@${node.version}`;
@@ -304,7 +351,7 @@ export class DependencyTracker {
                     const isOptional =
                       !!importerData?.optionalDependencies?.[depName];
 
-                    const linkNode: PackageNode = {
+                    const linkNode: DependencyNode = {
                       alias: depName,
                       name: depName,
                       version: depVersion,
@@ -358,7 +405,7 @@ export class DependencyTracker {
     for (const [importerId, importerData] of Object.entries(
       lockfile.importers || {},
     )) {
-      const nodes: PackageNode[] = [];
+      const nodes: DependencyNode[] = [];
 
       const allDeps = {
         ...importerData.dependencies,
@@ -383,7 +430,7 @@ export class DependencyTracker {
             );
 
             // Create a link node that preserves the intermediate package in the tree
-            const linkNode: PackageNode = {
+            const linkNode: DependencyNode = {
               alias: depName,
               name: depName,
               version: version,
@@ -408,7 +455,7 @@ export class DependencyTracker {
           new Set(),
         );
 
-        const node: PackageNode = {
+        const node: DependencyNode = {
           alias: depName,
           name: depName,
           version,
@@ -436,14 +483,14 @@ export class DependencyTracker {
     importerId: string,
     lockfile: PnpmLockfile,
     visitedImporters: Set<string>,
-  ): PackageNode[] {
+  ): DependencyNode[] {
     // Prevent infinite recursion on circular workspace links
     if (visitedImporters.has(importerId)) {
       return [];
     }
     visitedImporters.add(importerId);
 
-    const nodes: PackageNode[] = [];
+    const nodes: DependencyNode[] = [];
     const importerData = lockfile.importers?.[importerId];
     if (!importerData) return nodes;
 
@@ -474,7 +521,7 @@ export class DependencyTracker {
           );
 
           // Create a link node that preserves the intermediate package in the tree
-          const linkNode: PackageNode = {
+          const linkNode: DependencyNode = {
             alias: depName,
             name: depName,
             version: version,
@@ -501,7 +548,7 @@ export class DependencyTracker {
         visitedImporters,
       );
 
-      const node: PackageNode = {
+      const node: DependencyNode = {
         alias: depName,
         name: depName,
         version: version,
@@ -529,7 +576,7 @@ export class DependencyTracker {
     lockfile: PnpmLockfile,
     visited: Set<string>,
     visitedImporters?: Set<string>,
-  ): PackageNode[] | undefined {
+  ): DependencyNode[] | undefined {
     const packageId = `${packageName}@${packageVersion}`;
 
     // A subtree that is neither cut by a cycle nor contains a workspace
@@ -557,7 +604,7 @@ export class DependencyTracker {
     const outerContextDependent = this.subtreeContextDependent;
     this.subtreeContextDependent = false;
 
-    const childNodes: PackageNode[] = [];
+    const childNodes: DependencyNode[] = [];
 
     // Process all types of dependencies from snapshot (dependencies and optionalDependencies)
     const allSnapshotDeps = {
@@ -596,7 +643,7 @@ export class DependencyTracker {
                 )
               : [];
 
-          const linkNode: PackageNode = {
+          const linkNode: DependencyNode = {
             alias: childName,
             name: childName,
             version: versionStr,
@@ -612,7 +659,7 @@ export class DependencyTracker {
         continue;
       }
 
-      const childNode: PackageNode = {
+      const childNode: DependencyNode = {
         alias: childName,
         name: childName,
         version: versionStr,
@@ -736,9 +783,9 @@ export class DependencyTracker {
    * Traverse tree and build dependency map
    */
   private traverseTreeAndBuildMap(
-    nodes: PackageNode[],
+    nodes: DependencyNode[],
     importerId: string,
-    visited: Set<PackageNode>,
+    visited: Set<DependencyNode>,
   ): void {
     for (const node of nodes) {
       // Subtrees are shared, so the trees are DAGs. Without an identity check
@@ -922,7 +969,7 @@ export class DependencyTracker {
   /**
    * Get dependency trees for all importers (after initialization)
    */
-  async getDependencyTrees(): Promise<Record<string, PackageNode[]>> {
+  async getDependencyTrees(): Promise<Record<string, DependencyNode[]>> {
     await this.initialize();
     return this.dependencyTrees;
   }
@@ -964,7 +1011,7 @@ export class DependencyTracker {
    * Extract unique instance ID from node.path which includes peer dependency hash.
    * Path format: .../.pnpm/{name}@{version}_{peer-hash}/node_modules/{name}
    */
-  private extractInstanceIdFromPath(node: PackageNode): string {
+  private extractInstanceIdFromPath(node: DependencyNode): string {
     const fallbackId = `${node.name}@${node.version}`;
     if (!node.path) {
       return fallbackId;
@@ -1032,7 +1079,7 @@ export class DependencyTracker {
   /**
    * Get display ID for a node (lockfile key format, or store path if printStorePath is set)
    */
-  private getDisplayId(node: PackageNode): string {
+  private getDisplayId(node: DependencyNode): string {
     const storePath = this.extractInstanceIdFromPath(node);
     if (storePath === `${node.name}@${node.version}`) {
       return storePath;
@@ -1052,7 +1099,7 @@ export class DependencyTracker {
    * rules as the path searches. Used to prune subtrees before searching.
    */
   private nodeMatchesTarget(
-    node: PackageNode,
+    node: DependencyNode,
     targetPackageId: string,
   ): boolean {
     const nodeId = `${node.name}@${node.version}`;
@@ -1087,14 +1134,14 @@ export class DependencyTracker {
    * This is computed once per search in O(nodes + edges).
    */
   private collectNodesReachingTarget(
-    roots: PackageNode[],
+    roots: DependencyNode[],
     targetPackageId: string,
-  ): Set<PackageNode> {
-    const reaching = new Set<PackageNode>();
-    const resolved = new Map<PackageNode, boolean>();
-    const inProgress = new Set<PackageNode>();
+  ): Set<DependencyNode> {
+    const reaching = new Set<DependencyNode>();
+    const resolved = new Map<DependencyNode, boolean>();
+    const inProgress = new Set<DependencyNode>();
 
-    const visit = (node: PackageNode): boolean => {
+    const visit = (node: DependencyNode): boolean => {
       const memo = resolved.get(node);
       if (memo !== undefined) {
         return memo;
@@ -1137,12 +1184,12 @@ export class DependencyTracker {
   }
 
   private findPathInTree(
-    nodes: PackageNode[],
+    nodes: DependencyNode[],
     targetPackageId: string,
     currentPath: DependencyPathStep[],
     visitedNodeIds: Set<string>,
     depth: number,
-    reaching: Set<PackageNode>,
+    reaching: Set<DependencyNode>,
   ): DependencyPathStep[] | null {
     // Depth limit to prevent stack overflow even with cycles
     if (depth > 100) {
@@ -1277,14 +1324,14 @@ export class DependencyTracker {
    * Stops early once maxPaths is reached to prevent exponential explosion
    */
   private findAllPathsInTree(
-    nodes: PackageNode[],
+    nodes: DependencyNode[],
     targetPackageId: string,
     currentPath: DependencyPathStep[],
     visitedNodeIds: Set<string>,
     depth: number,
     paths: DependencyPathStep[][],
     maxPaths: number,
-    reaching: Set<PackageNode>,
+    reaching: Set<DependencyNode>,
   ): boolean {
     // Depth limit to prevent deep recursion and improve performance
     // Reduced to 50 for faster search when finding allPaths

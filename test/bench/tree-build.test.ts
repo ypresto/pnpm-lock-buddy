@@ -13,7 +13,7 @@ interface BenchResult {
   importers: number;
   /** Root-to-leaf paths through the workspace link graph. */
   linkPaths: number;
-  /** Distinct PackageNode objects retained (memory proxy). */
+  /** Distinct DependencyNode objects retained (memory proxy). */
   distinctNodes: number;
   ms: number;
 }

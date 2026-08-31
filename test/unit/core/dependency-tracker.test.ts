@@ -572,7 +572,7 @@ describe("DependencyTracker", () => {
       );
       const tracker = new DependencyTracker(fixturePath);
 
-      // Test basic functionality that should work with buildDependenciesHierarchy
+      // Test basic functionality that should work with buildDependenciesTree
       const importers = await tracker.getImportersForPackage("lodash@4.17.21");
       expect(importers).toContain(".");
 

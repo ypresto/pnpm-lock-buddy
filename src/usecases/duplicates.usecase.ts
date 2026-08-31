@@ -8,7 +8,7 @@ import {
 } from "../core/formatter.js";
 import { DependencyTracker } from "../core/dependency-tracker.js";
 import type { DependencyPathStep, DependencyInfo } from "../core/types.js";
-import type { PackageNode } from "@pnpm/reviewing.dependencies-hierarchy";
+import type { DependencyNode } from "@pnpm/deps.inspection.tree-builder";
 import {
   loadModulesYaml,
   getHoistedVersions,
@@ -328,7 +328,7 @@ export class DuplicatesUsecase {
    * Path format: .../.pnpm/{name}@{version}_{peer-hash}/node_modules/{name}
    * Returns the store path format: {name}@{version}_{peer-hash}
    */
-  private extractStorePathFromNode(node: PackageNode): string | null {
+  private extractStorePathFromNode(node: DependencyNode): string | null {
     if (!node.path) {
       return null;
     }
@@ -404,7 +404,7 @@ export class DuplicatesUsecase {
    * Extract unique instance ID from node.path.
    * Returns lockfile snapshot key if found (unless printStorePath is set), otherwise store path.
    */
-  private extractInstanceIdFromPath(node: PackageNode): string {
+  private extractInstanceIdFromPath(node: DependencyNode): string {
     const storePath = this.extractStorePathFromNode(node);
     if (!storePath) {
       return `${node.name}@${node.version}`;
@@ -423,10 +423,10 @@ export class DuplicatesUsecase {
    * Recursively collect package instances from tree nodes
    */
   private collectFromTreeNodes(
-    nodes: PackageNode[],
+    nodes: DependencyNode[],
     importerPath: string,
     instancesMap: Map<string, PackageInstance>,
-    visitedNodes: Set<PackageNode> = new Set(),
+    visitedNodes: Set<DependencyNode> = new Set(),
   ): void {
     for (const node of nodes) {
       // Prevent infinite recursion from circular node references

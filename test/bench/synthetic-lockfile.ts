@@ -3,7 +3,7 @@ import path from "path";
 import os from "os";
 import yaml from "js-yaml";
 import type { PnpmLockfile } from "../../src/core/lockfile";
-import type { PackageNode } from "@pnpm/reviewing.dependencies-hierarchy";
+import type { DependencyNode } from "@pnpm/deps.inspection.tree-builder";
 
 /**
  * Shape of the synthetic workspace used for tree-build benchmarks.
@@ -150,7 +150,7 @@ export function writeSyntheticLockfile(
 
 export interface TreeMetrics {
   /**
-   * Number of distinct PackageNode objects retained by the trees.
+   * Number of distinct DependencyNode objects retained by the trees.
    * This is the memory proxy: shared subtrees are counted once, rebuilt
    * subtrees are counted once per rebuild.
    */
@@ -164,12 +164,12 @@ export interface TreeMetrics {
  * result reflects allocation, not path count.
  */
 export function measureTrees(
-  trees: Record<string, PackageNode[]>,
+  trees: Record<string, DependencyNode[]>,
 ): TreeMetrics {
-  const seen = new Set<PackageNode>();
+  const seen = new Set<DependencyNode>();
   let edges = 0;
 
-  const stack: PackageNode[] = [];
+  const stack: DependencyNode[] = [];
   for (const roots of Object.values(trees)) {
     stack.push(...roots);
   }
