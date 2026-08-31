@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { depPathToFilename } from "@pnpm/dependency-path";
+import { depPathToFilename } from "@pnpm/deps.path";
 import { resolveStorePathToLockfileKey } from "../../../src/core/dep-path";
 
 describe("resolveStorePathToLockfileKey", () => {
@@ -90,7 +90,8 @@ describe("resolveStorePathToLockfileKey", () => {
   });
 
   // Regression: pnpm v9 uses base32 hashes (26 chars) in .pnpm/ directory names,
-  // while @pnpm/dependency-path@1001.x produces hex hashes (32 chars).
+  // while @pnpm/deps.path (v10+, formerly @pnpm/dependency-path) produces hex
+  // hashes (32 chars).
   // The prefix fallback must handle this hash algorithm mismatch.
   it("should resolve store paths with pnpm v9 base32 hashes via prefix fallback", () => {
     // Actual store paths from layerone created by pnpm v9 (base32 hashes)

@@ -1,4 +1,4 @@
-import { depPathToFilename } from "@pnpm/dependency-path";
+import { depPathToFilename } from "@pnpm/deps.path";
 import crypto from "crypto";
 
 // RFC 4648 base32 alphabet
