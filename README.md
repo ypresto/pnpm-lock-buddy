@@ -32,6 +32,27 @@ reduction in duplicate installs, not a detection regression.
 lookup for such packages may fail to resolve to the correct lockfile key;
 projects that don't use `namedRegistries` are unaffected.
 
+### Caveats
+
+- **pnpm v12's engine is a from-scratch Rust rewrite (pacquet), and no longer
+  uses the `@pnpm/*` JS packages this tool depends on for tree building and
+  dep-path parsing.** We verified this directly: the pnpm v11.24.0 CLI's own
+  bundle contains the same functions this tool calls (`buildDependenciesTree`,
+  `depPathToFilename`, etc. — and none of the old, pre-migration names), while
+  the pnpm v12.1.0 CLI package contains none of them at all — it ships only a
+  native-binary installer/loader. So this tool's pnpm-v11 compatibility is
+  "runs the same code pnpm v11 itself runs"; its pnpm-v12 compatibility is
+  "reads the lockfile format pnpm v12 writes", not "uses the same engine".
+  Per pnpm's own `@pnpm/napi` package README, these JS packages remain
+  published going forward because the v12 engine has no part in them (typed
+  data shapes, and small pure helpers too hot-path to justify a JS/Rust
+  boundary crossing) — not because pnpm v12 calls into them.
+- We have verified pnpm v9–v12 lockfile *parsing* (including the v11+
+  multi-document format) against real and synthetic fixtures, but have not
+  yet run this tool against a `node_modules` actually installed by the pnpm
+  v12 CLI. If you hit an issue specifically on a v12-installed project,
+  please open an issue.
+
 ## Quick Start
 
 ```bash
@@ -52,6 +73,13 @@ pnpm-lock-buddy duplicates --omit dev
 
 # CI/CD: exit code 1 if duplicates found
 pnpm-lock-buddy duplicates --exit-code
+
+# Search for packages by name (supports wildcards and semver ranges)
+pnpm-lock-buddy list lodash
+pnpm-lock-buddy list "react*" --output json
+
+# List every package in the lockfile
+pnpm-lock-buddy list
 ```
 
 ## Use Case: Detect Same Package with Different Peer Dependencies
@@ -117,6 +145,8 @@ apps/web:@types/react
 
 ## Options
 
+### `duplicates` (alias `dupes`)
+
 ```
 -f, --file <path>       Path to pnpm-lock.yaml file
 -a, --all               Show all packages, not just duplicates
@@ -127,10 +157,22 @@ apps/web:@types/react
 --depth <number>        Dependency tree build depth (default: 10)
 --omit <types...>       Omit: dev, optional, peer
 --ignore-dev            Shorthand for --omit dev
---ignore-file <path>    Path to ignore file for suppressing results
+--hoist                 Check node_modules/.modules.yaml for actually hoisted package conflicts
+--modules-dir <path>    Path to node_modules directory, for --hoist (default: node_modules)
 --print-store-path      Show pnpm store paths instead of lockfile keys
+--ignore-file <path>    Path to ignore file for suppressing results
 --exit-code             Exit 1 if duplicates found (for CI/CD)
 -o, --output <format>   Output format: tree, json
+```
+
+### `list` (alias `search`)
+
+```
+-f, --file <path>       Path to pnpm-lock.yaml file
+-e, --exact             Only match exact versions (disable semver matching)
+-p, --project <projects...>  Filter by importer/project paths
+--ignore-dev            Shorthand for --omit=dev
+-o, --output <format>   Output format: tree, json, list (default: tree)
 ```
 
 ## Output Format
