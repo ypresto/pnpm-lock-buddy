@@ -110,7 +110,11 @@ function detectHashFormat(
  * @param packageName - Package name, e.g. "next-navigation-guard"
  * @param storePath - Store path extracted from .pnpm directory (with + decoded to /)
  * @param candidates - All snapshot keys for this package name
- * @returns The matching lockfile key, or the first candidate as fallback
+ * @returns The matching lockfile key, the sole same-version candidate, or
+ *   `null` when there are no candidates at all OR none match the store
+ *   path's version (e.g. node_modules/pnpm-lock.yaml drift) — callers fall
+ *   back to the raw store path in either case, never to an arbitrary
+ *   wrong-version candidate.
  */
 export function resolveStorePathToLockfileKey(
   packageName: string,
@@ -143,8 +147,23 @@ export function resolveStorePathToLockfileKey(
     (k) => k === versionPrefix || k.startsWith(versionPrefix + "("),
   );
 
-  if (versionMatches.length <= 1) {
-    return versionMatches[0] ?? candidates[0]!;
+  if (versionMatches.length === 1) {
+    return versionMatches[0]!;
+  }
+
+  if (versionMatches.length === 0) {
+    // The installed store path's version matches none of the lockfile
+    // candidates for this package name — a real-world case found via
+    // node_modules/pnpm-lock.yaml drift (installed a version the current
+    // lockfile no longer lists). Falling back to an arbitrary
+    // wrong-version candidate here silently merged every project
+    // resolving the real, drifted version into one fake "duplicate"
+    // instance under whichever candidate happened to sort first. Treat
+    // this the same as having no candidates at all: the caller falls back
+    // to the raw store path, which is honest and still distinguishes real
+    // instances from each other, instead of misattributing to a package
+    // version that was never actually installed.
+    return null;
   }
 
   // Multiple candidates with same version - use deterministic filename matching

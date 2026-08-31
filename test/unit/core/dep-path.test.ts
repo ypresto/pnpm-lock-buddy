@@ -155,6 +155,28 @@ describe("resolveStorePathToLockfileKey", () => {
       resolveStorePathToLockfileKey("react", "react@19.2.4", [v1, v2]),
     ).toBe(v2);
   });
+
+  // Regression: found via real-world testing against a large monorepo where
+  // node_modules had drifted from pnpm-lock.yaml (installed 7.29.7, lockfile
+  // listed only 7.29.8 for that package name). None of the version-filtered
+  // candidates matched the store path's installed version, and the function
+  // fell back to `candidates[0]` — an arbitrary, wrong-version lockfile key.
+  // That silently merged every project resolving the real drifted version
+  // into one fake "duplicate" instance keyed by whichever candidate happened
+  // to sort first, causing far more (and wrong) "used by" attributions than
+  // the real duplicate.
+  it("returns null (not an arbitrary candidate) when the store path's version matches none of the candidates", () => {
+    const driftedStorePath = "@babel/types@7.29.7";
+    const lockfileCandidates = ["@babel/types@7.29.8", "@babel/types@7.12.13"];
+
+    const result = resolveStorePathToLockfileKey(
+      "@babel/types",
+      driftedStorePath,
+      lockfileCandidates,
+    );
+
+    expect(result).toBeNull();
+  });
 });
 
 describe("linkNodeIdentity", () => {
