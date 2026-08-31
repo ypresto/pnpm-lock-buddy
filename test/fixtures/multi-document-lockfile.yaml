@@ -1,0 +1,33 @@
+lockfileVersion: '9.0'
+
+configDependencies:
+  '@pnpm/plugin-example':
+    version: 1.0.0
+    checksum: sha512-testchecksum
+
+packageManagerDependencies:
+  pnpm: '11.25.0'
+
+packages: {}
+
+snapshots: {}
+---
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+  .:
+    dependencies:
+      express:
+        specifier: 4.18.2
+        version: 4.18.2
+
+packages:
+  express@4.18.2:
+    resolution: {integrity: sha512-test}
+
+snapshots:
+  express@4.18.2: {}

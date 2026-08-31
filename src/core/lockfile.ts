@@ -36,7 +36,15 @@ export function loadLockfile(filePath?: string): PnpmLockfile {
   try {
     // Read and parse the file
     const fileContent = fs.readFileSync(resolvedPath, "utf8");
-    const parsed = yaml.load(fileContent) as any;
+
+    // pnpm v11+ writes an "env" document (configDependencies /
+    // packageManagerDependencies) ahead of the project document when config
+    // dependencies or a pinned pnpm version are present, producing a
+    // multi-document YAML file separated by `---`. Per pnpm's own guidance
+    // for dependency-graph consumers (https://pnpm.io/lockfile), load all
+    // documents and use the last one, which is always the project document.
+    const documents = yaml.loadAll(fileContent) as unknown[];
+    const parsed = documents[documents.length - 1] as any;
 
     // Validate basic structure
     if (!parsed || typeof parsed !== "object") {
