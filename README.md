@@ -58,10 +58,16 @@ projects that don't use `namedRegistries` are unaffected.
   have caught what this found: `@pnpm/deps.inspection.tree-builder` bounds a
   whole-workspace build to O(N) nodes by returning every repeat occurrence of
   an already-expanded subtree as an empty `deduped: true` stub, a contract
-  this tool didn't originally know about and so treated as a childless leaf —
-  41% of all nodes on that monorepo came back deduped, undercounting real
-  duplicates by more than half. Fixed (see `src/core/tree-dedup.ts`). If you
-  hit tree-related discrepancies on a large real monorepo we haven't tested
+  this tool didn't originally know about and so treated as a childless leaf.
+  A first fix attempt (resolving each stub from another matching occurrence
+  found by resolved path) undercounted less but overcounted worse — it
+  attributed one project's dependencies to a different, unrelated project,
+  because the library's real cache key includes the remaining tree depth,
+  which isn't exposed on the public node shape a fix could match against.
+  This is being reworked to scope each project's tree build independently
+  (eliminating cross-project sharing entirely) rather than matched
+  heuristically; track this note for when that lands. If you hit
+  tree-related discrepancies on a large real monorepo we haven't tested
   against, please open an issue.
 
 ## Quick Start
