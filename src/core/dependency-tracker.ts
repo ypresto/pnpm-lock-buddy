@@ -5,6 +5,17 @@ import type {
   LinkedDependencyInfo,
   PackageDependencyInfo,
 } from "./types.js";
+// pnpm v11.x TS packages (this one included) are supported through at least
+// 2027-04-30 per pnpm's SECURITY.md, but pnpm v12's engine is a Rust rewrite
+// that no longer uses them internally. If this package's TS API line is
+// ever discontinued without a replacement, `@pnpm/napi` (the v12 Rust
+// engine's napi bindings; see https://pnpm.io/lockfile) is the most likely
+// migration target — but only `readLockfile` and the reverse-direction
+// `getDependents` are exposed there, not a forward tree builder, so
+// switching would mean rebuilding this class's traversal around reverse
+// lookups. It also ships ~30-40MB platform-specific native binaries with no
+// wasm/JS fallback, which is a real cost for a lightweight CLI, so it is not
+// adopted preemptively.
 import { buildDependenciesTree } from "@pnpm/deps.inspection.tree-builder";
 import type { DependencyNode } from "@pnpm/deps.inspection.tree-builder";
 import fs, { type Dirent } from "fs";
