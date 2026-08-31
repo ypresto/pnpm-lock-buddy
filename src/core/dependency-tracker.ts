@@ -21,6 +21,7 @@ import type { DependencyNode } from "@pnpm/deps.inspection.tree-builder";
 import fs, { type Dirent } from "fs";
 import path from "path";
 import { resolveStorePathToLockfileKey } from "./dep-path.js";
+import { materializeDedupedNodes } from "./tree-dedup.js";
 
 /**
  * Tracks transitive dependencies and provides lookup functionality
@@ -148,6 +149,12 @@ export class DependencyTracker {
         lockfileDir: this.lockfileDir,
         virtualStoreDirMaxLength: 120,
       });
+
+      // The library bounds a whole-workspace build to O(N) nodes by
+      // returning every repeat occurrence of a subtree as an empty
+      // `deduped: true` stub (see tree-dedup.ts). Resolve those in place
+      // before this class's traversal treats them as leaves.
+      materializeDedupedNodes(hierarchyResult);
 
       this.dependencyTrees = {};
 
@@ -1023,6 +1030,16 @@ export class DependencyTracker {
    * Path format: .../.pnpm/{name}@{version}_{peer-hash}/node_modules/{name}
    */
   private extractInstanceIdFromPath(node: DependencyNode): string {
+    // NOTE: this intentionally does NOT canonicalize link:... identities via
+    // linkNodeIdentity() the way duplicates.usecase.ts's copy does — several
+    // callers here (e.g. getDisplayId) use `=== \`${node.name}@${node.version}\``
+    // as a sentinel meaning "no resolved path info at all"; substituting a
+    // path-derived identity for link nodes made that sentinel check false
+    // for legitimately-unresolved links, which broke circular-path detection
+    // (a regression caught by the existing test suite). If the
+    // duplicates.usecase.ts-style false positive (the same linked package
+    // reported as multiple instances when reached at different relative
+    // depths) shows up here too, fix it without disturbing that sentinel.
     const fallbackId = `${node.name}@${node.version}`;
     if (!node.path) {
       return fallbackId;
