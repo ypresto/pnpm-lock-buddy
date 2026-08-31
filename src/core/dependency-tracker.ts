@@ -7,7 +7,7 @@ import type {
 } from "./types.js";
 import { buildDependenciesTree } from "@pnpm/deps.inspection.tree-builder";
 import type { DependencyNode } from "@pnpm/deps.inspection.tree-builder";
-import fs from "fs";
+import fs, { type Dirent } from "fs";
 import path from "path";
 import { resolveStorePathToLockfileKey } from "./dep-path.js";
 
@@ -179,6 +179,11 @@ export class DependencyTracker {
    * only pnpm's own bookkeeping files (.modules.yaml, lock.yaml). A minimal
    * or missing store is what mock/synthetic lockfiles in tests produce, and
    * is also what a real project has before its first `pnpm install`.
+   *
+   * Assumes the default virtual store location (node_modules/.pnpm), matching
+   * the same assumption already made by extractInstanceIdFromPath's store
+   * path parsing and the virtualStoreDirMaxLength option below; a project
+   * with a custom virtualStoreDir will always take the lockfile-only fallback.
    */
   private hasRealVirtualStore(): boolean {
     const virtualStoreDir = path.join(
@@ -187,9 +192,9 @@ export class DependencyTracker {
       ".pnpm",
     );
 
-    let entries: string[];
+    let entries: Dirent[];
     try {
-      entries = fs.readdirSync(virtualStoreDir);
+      entries = fs.readdirSync(virtualStoreDir, { withFileTypes: true });
     } catch {
       return false;
     }
@@ -197,14 +202,9 @@ export class DependencyTracker {
     // Real resolved packages are always directories (e.g. `lodash@4.17.21`,
     // `@scope+pkg@1.0.0`); pnpm's own bookkeeping files (`lock.yaml`, and
     // occasionally a stray `modules.yaml`) are plain files.
-    return entries.some((entry) => {
-      if (entry.startsWith(".")) return false;
-      try {
-        return fs.statSync(path.join(virtualStoreDir, entry)).isDirectory();
-      } catch {
-        return false;
-      }
-    });
+    return entries.some(
+      (entry) => !entry.name.startsWith(".") && entry.isDirectory(),
+    );
   }
 
   /**
