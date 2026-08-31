@@ -12,6 +12,11 @@ const fixturePath = path.join(
   "../../fixtures/multi-document-lockfile.yaml",
 );
 
+const trailingSeparatorFixturePath = path.join(
+  __dirname,
+  "../../fixtures/multi-document-lockfile-trailing-separator.yaml",
+);
+
 describe("loadLockfile with multi-document pnpm v11+ lockfile", () => {
   afterEach(() => {
     clearLockfileCache();
@@ -25,5 +30,15 @@ describe("loadLockfile with multi-document pnpm v11+ lockfile", () => {
     expect(result.importers["."]).toBeDefined();
     expect(result.packages?.["express@4.18.2"]).toBeDefined();
     expect(result.snapshots?.["express@4.18.2"]).toBeDefined();
+  });
+
+  it("ignores a trailing empty document produced by a trailing `---` separator", () => {
+    // js-yaml's loadAll() yields a trailing `null` document when the file
+    // ends with a bare `---` separator. That must not shadow the real
+    // project document that precedes it.
+    const result = loadLockfile(trailingSeparatorFixturePath);
+
+    expect(result.importers["."]).toBeDefined();
+    expect(result.packages?.["express@4.18.2"]).toBeDefined();
   });
 });

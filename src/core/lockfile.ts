@@ -43,8 +43,11 @@ export function loadLockfile(filePath?: string): PnpmLockfile {
     // multi-document YAML file separated by `---`. Per pnpm's own guidance
     // for dependency-graph consumers (https://pnpm.io/lockfile), load all
     // documents and use the last one, which is always the project document.
+    // A trailing `---` separator with nothing after it (or a blank document)
+    // yields a trailing `null` entry; skip those so they don't shadow the
+    // real project document that precedes them.
     const documents = yaml.loadAll(fileContent) as unknown[];
-    const parsed = documents[documents.length - 1] as any;
+    const parsed = documents.filter((d) => d != null).at(-1) as any;
 
     // Validate basic structure
     if (!parsed || typeof parsed !== "object") {
