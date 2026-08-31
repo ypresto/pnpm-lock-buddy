@@ -143,34 +143,45 @@ export class DependencyTracker {
     }
 
     try {
-      // Let buildDependenciesTree auto-detect all projects from lockfile
-      const hierarchyResult = await buildDependenciesTree(undefined, {
-        depth: this.depth,
-        lockfileDir: this.lockfileDir,
-        virtualStoreDirMaxLength: 120,
-      });
-
-      // The library bounds a whole-workspace build to O(N) nodes by
-      // returning every repeat occurrence of a subtree as an empty
-      // `deduped: true` stub (see tree-dedup.ts). Resolve those in place
-      // before this class's traversal treats them as leaves.
-      materializeDedupedNodes(hierarchyResult);
+      // Call buildDependenciesTree once PER PROJECT rather than once for the
+      // whole workspace (the `undefined` / auto-detect-all-projects form).
+      // The library shares one dependency graph and one materialization
+      // cache across every project passed to a single call, keyed by
+      // (graph nodeId, remaining tree depth) — neither of which is exposed
+      // on the public DependencyNode shape. That makes a `deduped: true`
+      // stub impossible to safely resolve from outside when the cache spans
+      // multiple projects: a heuristic match on `path`+`peersSuffixHash`
+      // (tried and reverted — see git history and CHANGELOG) can and did
+      // attribute one project's dependencies to a different, unrelated
+      // project. Scoping each call to a single project makes that
+      // structurally impossible — the shared graph can only ever contain
+      // nodes reachable from that one project — at the cost of one lockfile
+      // read per project instead of one for the whole workspace.
+      const lockfile = this.getLockfile();
+      const importerIds = Object.keys(lockfile.importers || {});
 
       this.dependencyTrees = {};
 
-      for (const [projectDir, hierarchy] of Object.entries(hierarchyResult)) {
-        const importerId =
-          projectDir === this.lockfileDir
-            ? "."
-            : path.relative(this.lockfileDir, projectDir);
+      for (const importerId of importerIds) {
+        const projectDir = path.join(this.lockfileDir, importerId);
+        const hierarchyResult = await buildDependenciesTree([projectDir], {
+          depth: this.depth,
+          lockfileDir: this.lockfileDir,
+          virtualStoreDirMaxLength: 120,
+        });
+        const hierarchy = hierarchyResult[projectDir] ?? {};
 
-        const allNodes: DependencyNode[] = [
+        // Dedup stubs can still appear within a single project's own tree
+        // (the same package reached via two sibling branches at the same
+        // depth) — safe to resolve here since the cache is scoped to just
+        // this one project.
+        materializeDedupedNodes({ [projectDir]: hierarchy });
+
+        this.dependencyTrees[importerId] = [
           ...(hierarchy.dependencies || []),
           ...(hierarchy.devDependencies || []),
           ...(hierarchy.optionalDependencies || []),
         ];
-
-        this.dependencyTrees[importerId] = allNodes;
       }
 
       // Check if trees are empty (happens with mock lockfiles in tests)
