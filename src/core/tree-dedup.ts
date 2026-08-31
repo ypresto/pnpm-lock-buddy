@@ -50,9 +50,9 @@ function resolveDeduped(
 }
 
 /**
- * @pnpm/deps.inspection.tree-builder bounds a whole-workspace tree build to
- * O(N) nodes by materializing each distinct subtree only once: every later
- * occurrence of the same package+peer-context comes back as a
+ * @pnpm/deps.inspection.tree-builder bounds a tree build to O(N) nodes by
+ * materializing each distinct subtree only once per `buildDependenciesTree`
+ * call: every later occurrence of the same node comes back as a
  * `deduped: true` stub with no `dependencies` of its own (see the library's
  * `MaterializationCache`, documented in its `getTree.d.ts`). Consumers that
  * walk `.dependencies` per node — as this codebase's duplicate-detection and
@@ -61,7 +61,30 @@ function resolveDeduped(
  *
  * Confirmed against a real ~135-project monorepo: 41% of all returned nodes
  * came back deduped, and duplicate detection dropped from 123 to 53 affected
- * projects before this fix.
+ * projects before accounting for this.
+ *
+ * CALLER CONTRACT — `trees` MUST come from a single `buildDependenciesTree`
+ * call scoped to ONE project (a single-element `projectPaths` array), never
+ * from a call spanning multiple projects. The library's real cache key is
+ * `(graph nodeId, remaining tree depth)` (see `getTree.js`'s
+ * `materializeCacheKey`), neither of which is exposed on the public
+ * `DependencyNode` shape this function receives. The `path`+`peersSuffixHash`
+ * key below is only a safe proxy for that when every node in `trees`
+ * originates from the same project's own dependency graph — spanning
+ * multiple projects' results let it substitute one project's dependencies
+ * onto a different, unrelated project's tree (confirmed on the same
+ * monorepo above: reverted, see git history and CHANGELOG for that
+ * incident). `dependency-tracker.ts` calls `buildDependenciesTree` once per
+ * project specifically so this contract holds.
+ *
+ * Residual limitation even within one project: this key still cannot
+ * distinguish two occurrences of the same node reached at genuinely
+ * different remaining depths (rare, but possible in a single project's own
+ * graph). Where that happens, the substituted subtree may be shallower or
+ * deeper than the library would have produced for that exact occurrence.
+ * This is a narrower, project-local version of the same identity gap, not
+ * fully closed — see the follow-up task on adding a real multi-project
+ * fixture regression test that would also help characterize this.
  *
  * Mutates every tree in `trees` in place, replacing each deduped node's
  * `dependencies` with the fully-expanded subtree found elsewhere in the same

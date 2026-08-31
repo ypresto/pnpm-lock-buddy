@@ -169,6 +169,12 @@ export class DependencyTracker {
           lockfileDir: this.lockfileDir,
           virtualStoreDirMaxLength: 120,
         });
+        // Empty when this importer isn't in the currently-installed lockfile
+        // (e.g. a partial `pnpm install --filter` that skipped it) — that
+        // project's tree silently comes back empty rather than falling back
+        // to buildTreesFromLockfile for just that one project. Pre-existing
+        // behavior, not introduced by per-project scoping: the same gap
+        // existed in the single whole-workspace call this replaced.
         const hierarchy = hierarchyResult[projectDir] ?? {};
 
         // Dedup stubs can still appear within a single project's own tree
