@@ -1236,8 +1236,11 @@ export class DependencyTracker {
     depth: number,
     reaching: Set<DependencyNode>,
   ): DependencyPathStep[] | null {
-    // Depth limit to prevent stack overflow even with cycles
-    if (depth > 100) {
+    // Depth limit to prevent stack overflow even with cycles, and (now that
+    // trees carry no depth limit of their own — see tree-dedup.ts's CALLER
+    // CONTRACT) to honor --depth: whichever of the hard safety ceiling or
+    // the configured depth is smaller.
+    if (depth > Math.min(100, this.depth)) {
       return null;
     }
     for (const node of nodes) {
@@ -1379,8 +1382,11 @@ export class DependencyTracker {
     reaching: Set<DependencyNode>,
   ): boolean {
     // Depth limit to prevent deep recursion and improve performance
-    // Reduced to 50 for faster search when finding allPaths
-    if (depth > 50) {
+    // (reduced to 50 for faster search when finding allPaths), and (now
+    // that trees carry no depth limit of their own — see tree-dedup.ts's
+    // CALLER CONTRACT) to honor --depth: whichever of the hard safety
+    // ceiling or the configured depth is smaller.
+    if (depth > Math.min(50, this.depth)) {
       return true; // Continue searching other branches
     }
 

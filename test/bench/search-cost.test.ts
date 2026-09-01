@@ -44,7 +44,9 @@ async function measure(npmLayers: number) {
 
   for (let rep = 0; rep < WARMUP + REPS; rep++) {
     const timed = rep >= WARMUP;
-    const tracker = new DependencyTracker(lockfilePath);
+    // This bench targets every npm layer up to npmLayers - 1, so depth must
+    // comfortably exceed that (unrelated to --depth truncation semantics).
+    const tracker = new DependencyTracker(lockfilePath, npmLayers + 5);
     nodes = measureTrees(await tracker.getDependencyTrees()).distinctNodes;
 
     const record = async (
