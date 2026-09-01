@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { DependencyNode } from "@pnpm/deps.inspection.tree-builder";
-import { materializeDedupedNodes } from "../../../src/core/tree-dedup";
+import {
+  materializeDedupedNodes,
+  canonicalizeLinkVersions,
+} from "../../../src/core/tree-dedup";
 
 // Minimal fields required by DependencyNode beyond what each test cares about.
 function node(
@@ -124,5 +127,113 @@ describe("materializeDedupedNodes", () => {
     expect(
       trees["project-b"].dependencies![0]!.dependencies![0]!.dependencies,
     ).toEqual([grandchildLeaf]);
+  });
+});
+
+describe("canonicalizeLinkVersions", () => {
+  const lockfileDir = "/repo";
+
+  it("rewrites a link node's version relative to lockfileDir, from its absolute path", () => {
+    const linkNode = node({
+      name: "shared-lib",
+      path: "/repo/packages/shared-lib",
+      version: "link:../../shared-lib", // wrong: relative to some other project
+    });
+    const trees = { "packages/app": { dependencies: [linkNode] } };
+
+    canonicalizeLinkVersions(trees, lockfileDir);
+
+    expect(linkNode.version).toBe("link:packages/shared-lib");
+  });
+
+  it("is idempotent — calling twice does not double-relativize", () => {
+    const linkNode = node({
+      name: "shared-lib",
+      path: "/repo/packages/shared-lib",
+      version: "link:../wrong",
+    });
+    const trees = { "packages/app": { dependencies: [linkNode] } };
+
+    canonicalizeLinkVersions(trees, lockfileDir);
+    const afterFirst = linkNode.version;
+    canonicalizeLinkVersions(trees, lockfileDir);
+
+    expect(linkNode.version).toBe(afterFirst);
+    expect(linkNode.version).toBe("link:packages/shared-lib");
+  });
+
+  it("leaves non-link versions unchanged", () => {
+    const npmNode = node({
+      name: "react",
+      path: "/repo/node_modules/.pnpm/react@18.2.0/node_modules/react",
+      version: "18.2.0",
+    });
+    const trees = { "packages/app": { dependencies: [npmNode] } };
+
+    canonicalizeLinkVersions(trees, lockfileDir);
+
+    expect(npmNode.version).toBe("18.2.0");
+  });
+
+  it("leaves link nodes with a non-absolute (fallback-builder) path unchanged", () => {
+    const fallbackLinkNode = node({
+      name: "shared-lib",
+      path: "node_modules/shared-lib", // relative placeholder, not absolute
+      version: "link:../shared-lib",
+    });
+    const trees = { "packages/app": { dependencies: [fallbackLinkNode] } };
+
+    canonicalizeLinkVersions(trees, lockfileDir);
+
+    expect(fallbackLinkNode.version).toBe("link:../shared-lib");
+  });
+
+  it("canonicalizes link nodes nested several levels deep", () => {
+    const deepLink = node({
+      name: "deep-lib",
+      path: "/repo/packages/deep-lib",
+      version: "link:../../../wrong",
+    });
+    const middle = node({
+      name: "middle",
+      path: "/repo/node_modules/.pnpm/middle@1.0.0/node_modules/middle",
+      version: "1.0.0",
+      dependencies: [deepLink],
+    });
+    const trees = { "packages/app": { dependencies: [middle] } };
+
+    canonicalizeLinkVersions(trees, lockfileDir);
+
+    expect(deepLink.version).toBe("link:packages/deep-lib");
+  });
+
+  it("canonicalizes a link node's version exactly once when its dependencies array is shared across projects", () => {
+    const shared = node({
+      name: "shared-lib",
+      path: "/repo/packages/shared-lib",
+      version: "link:donor-relative-wrong",
+    });
+    const sharedDeps = [shared];
+    const projectAEntry = node({
+      name: "consumer",
+      path: "/repo/node_modules/.pnpm/consumer@1.0.0/node_modules/consumer",
+      version: "1.0.0",
+      dependencies: sharedDeps,
+    });
+    const projectBEntry = node({
+      name: "consumer",
+      path: "/repo/node_modules/.pnpm/consumer@1.0.0/node_modules/consumer",
+      version: "1.0.0",
+      dependencies: sharedDeps, // same array reference, as materializeDedupedNodes would leave it
+    });
+
+    const trees = {
+      "packages/a": { dependencies: [projectAEntry] },
+      "packages/b": { dependencies: [projectBEntry] },
+    };
+
+    canonicalizeLinkVersions(trees, lockfileDir);
+
+    expect(shared.version).toBe("link:packages/shared-lib");
   });
 });

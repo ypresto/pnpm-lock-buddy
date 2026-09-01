@@ -1,3 +1,4 @@
+import path from "path";
 import type {
   DependenciesTree,
   DependencyNode,
@@ -110,5 +111,59 @@ export function materializeDedupedNodes(
   const resolvedIdentities = new Set<string>();
   for (const nodes of roots) {
     resolveDeduped(nodes, byIdentity, resolvedIdentities);
+  }
+}
+
+function canonicalizeLinkVersionsIn(
+  nodes: DependencyNode[] | undefined,
+  lockfileDir: string,
+  visited: Set<DependencyNode[]>,
+): void {
+  if (!nodes || visited.has(nodes)) return;
+  visited.add(nodes);
+
+  for (const node of nodes) {
+    if (node.version.startsWith("link:") && path.isAbsolute(node.path)) {
+      node.version = `link:${path.relative(lockfileDir, node.path)}`;
+    }
+    canonicalizeLinkVersionsIn(node.dependencies, lockfileDir, visited);
+  }
+}
+
+/**
+ * `@pnpm/deps.inspection.tree-builder` rewrites a workspace `link:` node's
+ * `version` to be relative to whichever project's `buildDependenciesTree`
+ * traversal first materialized that subtree (`rewriteLinkVersionDir`,
+ * computed once per top-level call and threaded through every node it
+ * produces — see `getPkgInfo.js`). In a batch call spanning multiple
+ * projects, a shared subtree's link versions stay relative to that first
+ * ("donor") project even when reused — under a different, unrelated
+ * project's own tree — for every project that reuses it via the
+ * materialization cache.
+ *
+ * `node.path` has no such problem: it's always the link target's absolute,
+ * resolved directory, independent of which project's traversal reached it.
+ * This rewrites every link node's `version` to be relative to `lockfileDir`
+ * (the workspace root) instead, using that absolute path — a single fixed
+ * basis valid from anywhere in the batch result, replacing whatever
+ * project-relative form the library computed. Idempotent: safe to call
+ * whether or not a given version was already relative to `lockfileDir`.
+ *
+ * Call together with materializeDedupedNodes (order doesn't matter — this
+ * walks the fully-restored tree either way) whenever `trees` may contain
+ * content shared across more than one project. Skips nodes built by the
+ * lockfile-only fallback tree builder (`buildTreesFromLockfile`), which use
+ * a relative placeholder path (`node_modules/<name>`), not an absolute one.
+ */
+export function canonicalizeLinkVersions(
+  trees: Record<string, DependenciesTree>,
+  lockfileDir: string,
+): void {
+  const visited = new Set<DependencyNode[]>();
+  for (const tree of Object.values(trees)) {
+    canonicalizeLinkVersionsIn(tree.dependencies, lockfileDir, visited);
+    canonicalizeLinkVersionsIn(tree.devDependencies, lockfileDir, visited);
+    canonicalizeLinkVersionsIn(tree.optionalDependencies, lockfileDir, visited);
+    canonicalizeLinkVersionsIn(tree.unsavedDependencies, lockfileDir, visited);
   }
 }
