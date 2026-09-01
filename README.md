@@ -78,10 +78,17 @@ projects that don't use `namedRegistries` are unaffected.
   enforced by this tool while walking the (uncapped) result, not by the
   tree-builder call. Verified on the same monorepo: exact project count
   match (123/123), duplicate-package count within 0.06% of the per-project
-  fix's own count (an expected, small variance from where a shared subtree's
-  "first materializer" lands, not a regression), and no cross-project
-  misattribution in spot checks. If you hit tree-related discrepancies on a
-  large real monorepo we haven't tested against, please open an issue.
+  fix's own count, and no cross-project misattribution in spot checks. That
+  0.06% (21 instances, all confirmed reachable only via dev/peer/link chains
+  11+ edges deep, all of which reappear identically at `--depth 20`) is a
+  depth-boundary edge case, not a regression: this tool's own BFS
+  "shallowest reachable depth" (`computeShallowestDepths`) and the old
+  per-project setup's library-internal "remaining depth" accounting don't
+  weight dev/peer/link edges identically right at the default `--depth 10`
+  boundary, so a handful of packages only reachable through long
+  toolchain-dependency chains land on opposite sides of the cutoff. If you
+  hit tree-related discrepancies on a large real monorepo we haven't tested
+  against, please open an issue.
 
 ## Quick Start
 
