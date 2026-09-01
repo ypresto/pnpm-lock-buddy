@@ -61,7 +61,15 @@ describe("materializeDedupedNodes", () => {
     expect(trees["project-a"].dependencies![0]!.dependencies).toBeUndefined();
   });
 
-  it("distinguishes two deduped nodes at the same path but different peer contexts via peersSuffixHash", () => {
+  // Real `package`-type nodes never actually hit this: their virtual-store
+  // `path` already encodes the full resolved depPath (peer suffix
+  // included), so two differently-resolved peer variants always get
+  // different paths too (confirmed directly in
+  // tree-builder-batch-integration.test.ts). peersSuffixHash is folded into
+  // the identity key anyway as harmless, redundant defense in depth — this
+  // test exercises that defense mechanism itself, on a contrived same-path
+  // case no real node shape is known to produce.
+  it("falls back to peersSuffixHash to distinguish two deduped nodes that do share the same path", () => {
     const leafA = node({ name: "leaf-a", path: "/store/leaf-a" });
     const leafB = node({ name: "leaf-b", path: "/store/leaf-b" });
     const expandedVariantA = node({
@@ -82,16 +90,26 @@ describe("materializeDedupedNodes", () => {
       peersSuffixHash: "hashA",
       deduped: true,
     });
+    const dedupedVariantB = node({
+      name: "workspace-link",
+      path: "/workspace/pkg",
+      peersSuffixHash: "hashB",
+      deduped: true,
+    });
 
     const trees = {
       "project-a": { dependencies: [expandedVariantA] },
       "project-b": { dependencies: [expandedVariantB] },
       "project-c": { dependencies: [dedupedVariantA] },
+      "project-d": { dependencies: [dedupedVariantB] },
     };
 
     materializeDedupedNodes(trees);
 
+    // Each deduped occurrence must resolve to ITS OWN variant's content, not
+    // whichever variant happened to be recorded first for that shared path.
     expect(trees["project-c"].dependencies![0]!.dependencies).toEqual([leafA]);
+    expect(trees["project-d"].dependencies![0]!.dependencies).toEqual([leafB]);
   });
 
   it("resolves deduped nodes nested several levels deep, not just at the tree root", () => {

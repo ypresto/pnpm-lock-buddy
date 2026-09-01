@@ -55,6 +55,12 @@ importers:
       a-only-lib:
         specifier: 1.0.0
         version: 1.0.0
+      '@ws/injected':
+        specifier: workspace:*
+        version: file:packages/injected(peer-lib@1.0.0)
+      peer-lib:
+        specifier: 1.0.0
+        version: 1.0.0
 
   apps/b:
     dependencies:
@@ -64,16 +70,34 @@ importers:
       common-lib:
         specifier: 1.0.0
         version: 1.0.0
+      '@ws/injected':
+        specifier: workspace:*
+        version: file:packages/injected(peer-lib@2.0.0)
+      peer-lib:
+        specifier: 2.0.0
+        version: 2.0.0
 
   packages/shared:
     dependencies:
       '@ws/deep':
         specifier: workspace:*
         version: link:../deep
+      '@ws/injected':
+        specifier: workspace:*
+        version: file:packages/injected(peer-lib@2.0.0)
+      peer-lib:
+        specifier: 2.0.0
+        version: 2.0.0
 
   packages/deep:
     dependencies:
       leaf-lib:
+        specifier: 1.0.0
+        version: 1.0.0
+      '@ws/injected':
+        specifier: workspace:*
+        version: file:packages/injected(peer-lib@1.0.0)
+      peer-lib:
         specifier: 1.0.0
         version: 1.0.0
 
@@ -92,6 +116,19 @@ packages:
   a-only-lib@1.0.0:
     resolution: {integrity: sha512-aonly}
 
+  '@ws/injected@file:packages/injected':
+    resolution: {directory: packages/injected, type: directory}
+    name: '@ws/injected'
+    version: 0.0.0
+    peerDependencies:
+      peer-lib: '*'
+
+  peer-lib@1.0.0:
+    resolution: {integrity: sha512-peerlib1}
+
+  peer-lib@2.0.0:
+    resolution: {integrity: sha512-peerlib2}
+
 snapshots:
   common-lib@1.0.0:
     dependencies:
@@ -102,6 +139,18 @@ snapshots:
   leaf-lib@1.0.0: {}
 
   a-only-lib@1.0.0: {}
+
+  '@ws/injected@file:packages/injected(peer-lib@1.0.0)':
+    dependencies:
+      peer-lib: 1.0.0
+
+  '@ws/injected@file:packages/injected(peer-lib@2.0.0)':
+    dependencies:
+      peer-lib: 2.0.0
+
+  peer-lib@1.0.0: {}
+
+  peer-lib@2.0.0: {}
 `;
 
   fs.writeFileSync(
@@ -119,6 +168,7 @@ snapshots:
     "apps/b",
     "packages/shared",
     "packages/deep",
+    "packages/injected", // file:-resolved, not a workspace importer, but still a real directory
   ]) {
     fs.mkdirSync(path.join(workspaceDir, importer), { recursive: true });
   }
@@ -251,14 +301,73 @@ describe("batch depth:Infinity buildDependenciesTree call (real library, no inst
         ...(tree.optionalDependencies ?? []),
       ];
 
-      const sharedLink =
-        findNode(allNodes, "@ws/shared") ?? tree.dependencies?.[0];
       const deepLink =
         id === "packages/shared"
           ? findNode(allNodes, "@ws/deep")
-          : findNode(sharedLink?.dependencies, "@ws/deep");
+          : (() => {
+              const sharedLink = findNode(allNodes, "@ws/shared");
+              expect(sharedLink).toBeDefined();
+              return findNode(sharedLink?.dependencies, "@ws/deep");
+            })();
 
       expect(deepLink?.version).toBe("link:packages/deep");
+    }
+  });
+
+  it("does not conflate two peer-dependency variants of the same file-resolved package sharing one physical path", async () => {
+    // @ws/injected is `file:`-resolved: both peer variants below live at the
+    // exact same physical directory (packages/injected), unlike a normal
+    // npm package where a different peer resolution gets a different store
+    // path. path alone can't tell these apart — only peersSuffixHash can
+    // (see nodeIdentityKey's doc comment). Each variant has two consumers
+    // (so each gets its own genuine deduped stub to restore, not just an
+    // original occurrence that never needed lookup): apps/a and
+    // packages/deep both use peer-lib@1.0.0; apps/b and packages/shared
+    // both use peer-lib@2.0.0. A path-only key would let one variant's
+    // stub restore with the other variant's content.
+    const importerIds = [
+      "apps/a",
+      "apps/b",
+      "packages/deep",
+      "packages/shared",
+    ].sort();
+    const projectPaths = importerIds.map((id) => path.join(workspaceDir, id));
+
+    const result = await buildDependenciesTree(projectPaths, {
+      depth: Infinity,
+      lockfileDir: workspaceDir,
+      virtualStoreDirMaxLength: 120,
+    });
+
+    materializeDedupedNodes(result);
+
+    const expectedPeerVersion: Record<string, string> = {
+      "apps/a": "1.0.0",
+      "packages/deep": "1.0.0",
+      "apps/b": "2.0.0",
+      "packages/shared": "2.0.0",
+    };
+
+    for (const [id, expectedVersion] of Object.entries(expectedPeerVersion)) {
+      const projectDir = path.join(workspaceDir, id);
+      const tree = result[projectDir]!;
+      const allNodes = [
+        ...(tree.dependencies ?? []),
+        ...(tree.devDependencies ?? []),
+        ...(tree.optionalDependencies ?? []),
+      ];
+
+      // Direct (top-level) lookup only — NOT the recursive findNode helper:
+      // packages/shared's tree also reaches packages/deep's own @ws/injected
+      // transitively (through the @ws/deep link), so a recursive search for
+      // the first node named "@ws/injected" can find that nested one instead
+      // of packages/shared's own direct dependency of the same name.
+      const injected = allNodes.find((n) => n.name === "@ws/injected");
+      expect(injected).toBeDefined();
+      const peerLib = injected?.dependencies?.find(
+        (d) => d.name === "peer-lib",
+      );
+      expect(peerLib?.version).toBe(expectedVersion);
     }
   });
 });

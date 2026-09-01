@@ -5,11 +5,14 @@ import type {
 } from "@pnpm/deps.inspection.tree-builder";
 
 /**
- * Unique identity key for a DependencyNode within the whole-workspace tree
- * build's materialization cache. `path` alone is not always enough: a
- * workspace `link:` node reached through different peer-dependency contexts
- * can share the same `path` while resolving a different peer variant, which
- * is exactly what `peersSuffixHash` distinguishes.
+ * Unique identity key for a DependencyNode within a tree build's
+ * materialization cache. `path` alone is already sufficient in practice —
+ * confirmed directly (test/unit/core/tree-builder-batch-integration.test.ts):
+ * for a real `package`-type node, the virtual-store path itself encodes the
+ * full resolved depPath, peer suffix included, so two differently-resolved
+ * peer variants of the same package always get different `path`s too.
+ * `peersSuffixHash` is folded in anyway as harmless, redundant defense in
+ * depth in case some node shape doesn't hold that invariant.
  */
 function nodeIdentityKey(node: DependencyNode): string {
   return `${node.path}::${node.peersSuffixHash ?? ""}`;
