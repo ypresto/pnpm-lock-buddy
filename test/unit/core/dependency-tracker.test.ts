@@ -328,6 +328,52 @@ describe("DependencyTracker", () => {
     });
   });
 
+  describe("--depth affects path search only, never detection", () => {
+    it("detects usage beyond --depth even though path search is limited by it", async () => {
+      // A 10-level chain, with a deliberately tiny --depth (2): detection
+      // (isPackageUsed/getImportersForPackage) must still find level-9 (a
+      // BFS over an already-deduped tree, unbounded by design — see
+      // UNBOUNDED_TREE_DEPTH in tree-depth.ts), while path search
+      // (getDependencyPath) legitimately can't recurse past depth 2 and
+      // correctly reports no path.
+      const deepLockfile: PnpmLockfile = {
+        lockfileVersion: "9.0",
+        importers: {
+          ".": {
+            dependencies: {
+              "level-0": { specifier: "1.0.0", version: "1.0.0" },
+            },
+          },
+        },
+        packages: Object.fromEntries(
+          Array.from({ length: 10 }, (_, i) => [
+            `level-${i}@1.0.0`,
+            { resolution: { integrity: `sha512-level${i}` } },
+          ]),
+        ),
+        snapshots: Object.fromEntries([
+          ...Array.from({ length: 9 }, (_, i) => [
+            `level-${i}@1.0.0`,
+            { dependencies: { [`level-${i + 1}`]: "1.0.0" } },
+          ]),
+          ["level-9@1.0.0", {}],
+        ]),
+      };
+
+      const lockfilePath = writeMockLockfile(deepLockfile);
+      const tracker = new DependencyTracker(lockfilePath, 2);
+
+      expect(await tracker.isPackageUsed("level-9@1.0.0")).toBe(true);
+
+      const importers = await tracker.getImportersForPackage("level-9@1.0.0");
+      expect(importers).toContain(".");
+
+      await expect(
+        tracker.getDependencyPath(".", "level-9@1.0.0"),
+      ).rejects.toThrow("Dependency path not found");
+    });
+  });
+
   describe("caching behavior", () => {
     it("should cache results and return same array reference on subsequent calls", async () => {
       const lockfilePath = writeMockLockfile(mockLockfile);

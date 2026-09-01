@@ -25,16 +25,15 @@ import {
   materializeDedupedNodes,
   canonicalizeLinkVersions,
 } from "./tree-dedup.js";
-import { computeShallowestDepths } from "./tree-depth.js";
+import { computeShallowestDepths, UNBOUNDED_TREE_DEPTH } from "./tree-depth.js";
 
-// buildDependenciesTree's `depth` option MUST be this, never `this.depth` or
-// any other finite number, whenever the call batches more than one project
-// (as buildTreesFromPnpm's does) — see tree-dedup.ts's CALLER CONTRACT for
-// why a finite depth across multiple projects reintroduces the
-// cross-project cache-contamination bug materializeDedupedNodes exists to
-// avoid. Named instead of inlined so a future edit that swaps this for
-// `this.depth` reads as an obviously wrong diff, not a plausible one.
-const UNBOUNDED_TREE_DEPTH = Infinity;
+// UNBOUNDED_TREE_DEPTH (see its own doc comment for the detection use) also
+// applies to buildDependenciesTree's `depth` option below, whenever the call
+// batches more than one project (as buildTreesFromPnpm's does) — see
+// tree-dedup.ts's CALLER CONTRACT for why a finite depth across multiple
+// projects reintroduces the cross-project cache-contamination bug
+// materializeDedupedNodes exists to avoid. Never pass `this.depth` (the
+// user-facing --depth) to buildDependenciesTree here.
 
 /**
  * Tracks transitive dependencies and provides lookup functionality
@@ -838,20 +837,21 @@ export class DependencyTracker {
   }
 
   /**
-   * Traverse tree and build dependency map, limited to this.depth levels
-   * below the importer's direct dependencies (depth 1). Since trees are now
-   * built with no depth limit of their own (see tree-dedup.ts's CALLER
-   * CONTRACT), --depth has to be enforced here instead of by how deep the
-   * tree itself goes; computeShallowestDepths gives each node its shallowest
-   * reachable depth in one BFS pass (also serving as the DAG identity-visit
-   * that keeps this from walking every distinct path instead of every node,
-   * which is exponential in a diamond-shaped dependency graph).
+   * Traverse tree and build dependency map. Unbounded depth: whether a
+   * package is used by an importer at all shouldn't depend on --depth (see
+   * UNBOUNDED_TREE_DEPTH's comment) — --depth only limits path *search*
+   * (findPathInTree / findAllPathsInTree), not detection. computeShallowestDepths
+   * gives each node its shallowest reachable depth in one BFS pass (also
+   * serving as the DAG identity-visit that keeps this from walking every
+   * distinct path instead of every node, which is exponential in a
+   * diamond-shaped dependency graph) — bounded by distinct-node count, not
+   * depth, so this is unbounded-depth-safe.
    */
   private traverseTreeAndBuildMap(
     nodes: DependencyNode[],
     importerId: string,
   ): void {
-    const depths = computeShallowestDepths(nodes, this.depth);
+    const depths = computeShallowestDepths(nodes, UNBOUNDED_TREE_DEPTH);
 
     for (const node of depths.keys()) {
       const packageId = `${node.name}@${node.version}`;
@@ -867,10 +867,11 @@ export class DependencyTracker {
 
       if (node.dependencies) {
         for (const child of node.dependencies) {
-          // Skip a child only reachable beyond this.depth through every
-          // path — computeShallowestDepths already excludes it, so it
-          // wouldn't get its own map entry from its own depths.keys() pass
-          // either; skip its directDependents edge here for the same reason.
+          // With UNBOUNDED_TREE_DEPTH above, computeShallowestDepths never
+          // excludes a reachable node, so this is always true in practice —
+          // kept as a direct, defensive consequence of depths' own contract
+          // (a child computeShallowestDepths excluded shouldn't get a
+          // directDependents edge here either) rather than assuming that.
           if (!depths.has(child)) continue;
 
           const childId = `${child.name}@${child.version}`;

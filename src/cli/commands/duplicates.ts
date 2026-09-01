@@ -41,7 +41,7 @@ export function createDuplicatesCommand(): Command {
     )
     .option(
       "--depth <number>",
-      "Depth for building dependency tree (default: 10, use higher for deep monorepos)",
+      "Limit how far --deps path search recurses (default: 10). Duplicate detection itself is always exhaustive and unaffected by this option.",
       "10",
     )
     .option(

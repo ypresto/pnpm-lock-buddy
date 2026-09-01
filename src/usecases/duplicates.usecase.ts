@@ -20,7 +20,10 @@ import {
   resolveStorePathToLockfileKey,
   linkNodeIdentity,
 } from "../core/dep-path.js";
-import { computeShallowestDepths } from "../core/tree-depth.js";
+import {
+  computeShallowestDepths,
+  UNBOUNDED_TREE_DEPTH,
+} from "../core/tree-depth.js";
 
 export interface DuplicatesOptions {
   showAll?: boolean;
@@ -63,7 +66,6 @@ export class DuplicatesUsecase {
   private dependencyTracker: DependencyTracker;
   private lockfile: PnpmLockfile;
   private lockfilePath: string;
-  private depth: number;
   private modulesYaml?: ModulesYaml;
   private hoistedVersions?: Map<string, HoistedVersionInfo[]>; // packageName -> hoisted version info
   private printStorePath = false; // Show store paths instead of lockfile key format
@@ -74,7 +76,10 @@ export class DuplicatesUsecase {
     depth: number = 10,
   ) {
     this.lockfilePath = lockfilePath;
-    this.depth = depth;
+    // `depth` is forwarded to DependencyTracker for its path-search use
+    // (--deps) only; detection (collectFromTreeNodes below) is intentionally
+    // depth-unbounded, so this class keeps no depth field of its own — see
+    // UNBOUNDED_TREE_DEPTH's doc comment in tree-depth.ts.
     this.dependencyTracker = new DependencyTracker(lockfilePath, depth);
     this.lockfile = lockfile;
   }
@@ -426,17 +431,16 @@ export class DuplicatesUsecase {
   }
 
   /**
-   * Collect package instances from tree nodes, limited to this.depth levels
-   * below the importer's direct dependencies. See traverseTreeAndBuildMap in
-   * dependency-tracker.ts for why depth is enforced here rather than by how
-   * deep the tree itself goes.
+   * Collect package instances from tree nodes. Depth-unbounded: see
+   * UNBOUNDED_TREE_DEPTH's doc comment (tree-depth.ts) for why duplicate
+   * detection shouldn't depend on --depth, unlike path search.
    */
   private collectFromTreeNodes(
     nodes: DependencyNode[],
     importerPath: string,
     instancesMap: Map<string, PackageInstance>,
   ): void {
-    const depths = computeShallowestDepths(nodes, this.depth);
+    const depths = computeShallowestDepths(nodes, UNBOUNDED_TREE_DEPTH);
 
     for (const node of depths.keys()) {
       // Extract unique instance ID from path which includes peer dependency context
@@ -994,9 +998,7 @@ export class DuplicatesUsecase {
             pkg.instances.some((inst: any) => !inst.hoisted);
 
           return (
-            uniqueIdsAfterOmit.size > 1 ||
-            options.showAll ||
-            hasHoistedMismatch
+            uniqueIdsAfterOmit.size > 1 || options.showAll || hasHoistedMismatch
           );
         });
 

@@ -1,6 +1,25 @@
 import type { DependencyNode } from "@pnpm/deps.inspection.tree-builder";
 
 /**
+ * Pass this, never a finite number, to `computeShallowestDepths` for
+ * *detection* purposes (is a package used at all, by which importers) —
+ * `dependency-tracker.ts`'s `traverseTreeAndBuildMap` and
+ * `duplicates.usecase.ts`'s `collectFromTreeNodes`. Whether something is
+ * used shouldn't depend on how deep in the tree it happens to sit, and it's
+ * cheap regardless: this function is a BFS bounded by distinct-node count
+ * (the tree is already deduped, O(N)), not by depth or path count.
+ *
+ * The user-facing `--depth` option still does something real — it limits
+ * how far a *path search* recurses (`findPathInTree` / `findAllPathsInTree`
+ * in `dependency-tracker.ts`, via `Math.min(hard limit, this.depth)`) —
+ * because enumerating every path through a wide, heavily-shared graph (not
+ * just visiting every node) can still blow up combinatorially within any
+ * fixed depth. Detection and path search are answering different
+ * questions, so they don't share the same depth limit.
+ */
+export const UNBOUNDED_TREE_DEPTH = Infinity;
+
+/**
  * Shallowest depth at which each node in a DAG built from `roots` is
  * reachable, capped at `maxDepth` (roots are depth 1). Nodes only reachable
  * beyond `maxDepth` — through every path that reaches them — are absent

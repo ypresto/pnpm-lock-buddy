@@ -47,7 +47,7 @@ projects that don't use `namedRegistries` are unaffected.
   published going forward because the v12 engine has no part in them (typed
   data shapes, and small pure helpers too hot-path to justify a JS/Rust
   boundary crossing) — not because pnpm v12 calls into them.
-- We have verified pnpm v9–v12 lockfile *parsing* (including the v11+
+- We have verified pnpm v9–v12 lockfile _parsing_ (including the v11+
   multi-document format) against real and synthetic fixtures, but have not
   yet run this tool against a `node_modules` actually installed by the pnpm
   v12 CLI. If you hit an issue specifically on a v12-installed project,
@@ -61,7 +61,7 @@ projects that don't use `namedRegistries` are unaffected.
   tool didn't originally know about and so treated as a childless leaf. A
   first fix attempt (resolving each stub from another matching occurrence
   found by resolved path across a whole-workspace, all-projects-at-once tree
-  build with a *finite* depth) undercounted less but overcounted worse — it
+  build with a _finite_ depth) undercounted less but overcounted worse — it
   attributed one project's dependencies to a different, unrelated project,
   because at finite depth the library's real cache key includes the
   remaining tree depth, which isn't exposed on the public node shape a fix
@@ -69,7 +69,7 @@ projects that don't use `namedRegistries` are unaffected.
   independent call fixed that (eliminating cross-project cache sharing
   structurally) at a real cost: ~3x slower than a single shared-cache call
   (~40s vs. ~12s on the test monorepo). The actual fix passes `depth:
-  Infinity` to a single call spanning every project instead: at infinite
+Infinity` to a single call spanning every project instead: at infinite
   depth the library's cache key collapses to just the node identity (no
   depth component left to be ambiguous — see `tree-dedup.ts`'s doc comments
   for the source-level detail), so a single shared-cache batch call is safe
@@ -80,15 +80,18 @@ projects that don't use `namedRegistries` are unaffected.
   match (123/123), duplicate-package count within 0.06% of the per-project
   fix's own count, and no cross-project misattribution in spot checks. That
   0.06% (21 instances, all confirmed reachable only via dev/peer/link chains
-  11+ edges deep, all of which reappear identically at `--depth 20`) is a
-  depth-boundary edge case, not a regression: this tool's own BFS
-  "shallowest reachable depth" (`computeShallowestDepths`) and the old
-  per-project setup's library-internal "remaining depth" accounting don't
-  weight dev/peer/link edges identically right at the default `--depth 10`
-  boundary, so a handful of packages only reachable through long
-  toolchain-dependency chains land on opposite sides of the cutoff. If you
-  hit tree-related discrepancies on a large real monorepo we haven't tested
-  against, please open an issue.
+  11+ edges deep, all of which reappeared identically at `--depth 20`) traced
+  to `--depth` still limiting _detection_ at the time: this tool's own BFS
+  "shallowest reachable depth" and the old per-project setup's
+  library-internal "remaining depth" accounting didn't weight dev/peer/link
+  edges identically right at the default `--depth 10` boundary. Since fixed
+  by making detection depth-unbounded unconditionally — `--depth` now only
+  limits how far `--deps` path search recurses, never whether a duplicate is
+  detected in the first place (`UNBOUNDED_TREE_DEPTH`'s doc comment in
+  `tree-depth.ts` has the reasoning: detection is a BFS over an already-deduped,
+  O(N) tree, so it's depth-unbounded-safe, unlike path enumeration through a
+  wide graph). If you hit tree-related discrepancies on a large real monorepo
+  we haven't tested against, please open an issue.
 
 ## Quick Start
 
@@ -155,18 +158,18 @@ The step fails if duplicates are found. Set `comment: 'true'` to post results as
 
 ### Action Inputs
 
-| Input | Default | Description |
-|-------|---------|-------------|
-| `packages` | (required) | Space-separated package names (supports wildcards) |
-| `per-project` | `true` | Group duplicates by project |
-| `deps` | `false` | Show dependency tree paths |
-| `omit` | | Dependency types to omit (e.g., `dev optional`) |
-| `lockfile` | | Path to pnpm-lock.yaml |
-| `ignore-file` | `.pnpm-lock-buddy-ignore` | Path to ignore file |
-| `comment` | `false` | Post results as a collapsible PR comment (needs `pull-requests: write`) |
-| `max-old-space-size` | `8192` | Node.js heap size in MB |
-| `version` | (bundled) | pnpm-lock-buddy version |
-| `extra-args` | | Additional CLI arguments |
+| Input                | Default                   | Description                                                             |
+| -------------------- | ------------------------- | ----------------------------------------------------------------------- |
+| `packages`           | (required)                | Space-separated package names (supports wildcards)                      |
+| `per-project`        | `true`                    | Group duplicates by project                                             |
+| `deps`               | `false`                   | Show dependency tree paths                                              |
+| `omit`               |                           | Dependency types to omit (e.g., `dev optional`)                         |
+| `lockfile`           |                           | Path to pnpm-lock.yaml                                                  |
+| `ignore-file`        | `.pnpm-lock-buddy-ignore` | Path to ignore file                                                     |
+| `comment`            | `false`                   | Post results as a collapsible PR comment (needs `pull-requests: write`) |
+| `max-old-space-size` | `8192`                    | Node.js heap size in MB                                                 |
+| `version`            | (bundled)                 | pnpm-lock-buddy version                                                 |
+| `extra-args`         |                           | Additional CLI arguments                                                |
 
 ### Ignore File
 
@@ -191,7 +194,7 @@ apps/web:@types/react
 --project <projects>    Filter by project paths (comma-separated)
 --deps                  Show dependency tree paths
 --deps-depth <number>   Limit tree display depth
---depth <number>        Dependency tree build depth (default: 10)
+--depth <number>        Limit how far --deps path search recurses (default: 10) — duplicate detection itself is always exhaustive
 --omit <types...>       Omit: dev, optional, peer
 --ignore-dev            Shorthand for --omit dev
 --hoist                 Check node_modules/.modules.yaml for actually hoisted package conflicts
@@ -215,6 +218,7 @@ apps/web:@types/react
 ## Output Format
 
 **Global mode** (default):
+
 ```
 react has 2 instances:
   react@18.2.0 [1] (dependencies)
@@ -224,6 +228,7 @@ react has 2 instances:
 ```
 
 **Per-project mode** (`--per-project`):
+
 ```
 react:
   apps/web: has 2 instances
