@@ -27,6 +27,15 @@ import {
 } from "./tree-dedup.js";
 import { computeShallowestDepths } from "./tree-depth.js";
 
+// buildDependenciesTree's `depth` option MUST be this, never `this.depth` or
+// any other finite number, whenever the call batches more than one project
+// (as buildTreesFromPnpm's does) — see tree-dedup.ts's CALLER CONTRACT for
+// why a finite depth across multiple projects reintroduces the
+// cross-project cache-contamination bug materializeDedupedNodes exists to
+// avoid. Named instead of inlined so a future edit that swaps this for
+// `this.depth` reads as an obviously wrong diff, not a plausible one.
+const UNBOUNDED_TREE_DEPTH = Infinity;
+
 /**
  * Tracks transitive dependencies and provides lookup functionality
  * to find which importers ultimately use a given package
@@ -175,7 +184,7 @@ export class DependencyTracker {
       );
 
       const hierarchyResult = await buildDependenciesTree(projectPaths, {
-        depth: Infinity,
+        depth: UNBOUNDED_TREE_DEPTH,
         lockfileDir: this.lockfileDir,
         virtualStoreDirMaxLength: 120,
       });
