@@ -216,9 +216,9 @@ export class DependencyTracker {
    * is also what a real project has before its first `pnpm install`.
    *
    * Assumes the default virtual store location (node_modules/.pnpm), matching
-   * the same assumption already made by extractInstanceIdFromPath's store
-   * path parsing and the virtualStoreDirMaxLength option below; a project
-   * with a custom virtualStoreDir will always take the lockfile-only fallback.
+   * the same assumption already made by extractStorePath's store path
+   * parsing and the virtualStoreDirMaxLength option below; a project with a
+   * custom virtualStoreDir will always take the lockfile-only fallback.
    */
   private hasRealVirtualStore(): boolean {
     const virtualStoreDir = path.join(
@@ -1043,33 +1043,25 @@ export class DependencyTracker {
   }
 
   /**
-   * Extract unique instance ID from node.path which includes peer dependency hash.
+   * Extract the .pnpm store dirname from node.path, decoded back to lockfile
+   * key form (+ -> /). Returns null when there's no `.pnpm/...` segment to
+   * extract from (link nodes, missing path, or a fallback-built node) —
+   * distinct from a store dirname that happens to render identically to
+   * `${name}@${version}` (a package with no peer-dep suffix), which is a
+   * real, non-null result.
    * Path format: .../.pnpm/{name}@{version}_{peer-hash}/node_modules/{name}
    */
-  private extractInstanceIdFromPath(node: DependencyNode): string {
-    // NOTE: this intentionally does NOT canonicalize link:... identities via
-    // linkNodeIdentity() the way duplicates.usecase.ts's copy does — several
-    // callers here (e.g. getDisplayId) use `=== \`${node.name}@${node.version}\``
-    // as a sentinel meaning "no resolved path info at all"; substituting a
-    // path-derived identity for link nodes made that sentinel check false
-    // for legitimately-unresolved links, which broke circular-path detection
-    // (a regression caught by the existing test suite). If the
-    // duplicates.usecase.ts-style false positive (the same linked package
-    // reported as multiple instances when reached at different relative
-    // depths) shows up here too, fix it without disturbing that sentinel.
-    const fallbackId = `${node.name}@${node.version}`;
+  private extractStorePath(node: DependencyNode): string | null {
     if (!node.path) {
-      return fallbackId;
+      return null;
     }
 
     const pnpmMatch = node.path.match(/\.pnpm\/([^/]+)\/node_modules\//);
     if (pnpmMatch && pnpmMatch[1]) {
-      const packageId = pnpmMatch[1];
-      const decoded = packageId.replace(/\+/g, "/");
-      return decoded;
+      return pnpmMatch[1].replace(/\+/g, "/");
     }
 
-    return fallbackId;
+    return null;
   }
 
   /**
@@ -1125,9 +1117,14 @@ export class DependencyTracker {
    * Get display ID for a node (lockfile key format, or store path if printStorePath is set)
    */
   private getDisplayId(node: DependencyNode): string {
-    const storePath = this.extractInstanceIdFromPath(node);
-    if (storePath === `${node.name}@${node.version}`) {
-      return storePath;
+    const fallbackId = `${node.name}@${node.version}`;
+    const storePath = this.extractStorePath(node);
+    // No resolvable store path (link, missing path, fallback-built node), or
+    // a store dirname that renders identically to name@version anyway (a
+    // package with no peer-dep suffix) — either way, skip the lockfile-key
+    // lookup and use the plain id.
+    if (storePath === null || storePath === fallbackId) {
+      return fallbackId;
     }
     // If printStorePath is set, return store path directly
     if (this.printStorePath) {
@@ -1148,9 +1145,10 @@ export class DependencyTracker {
     targetPackageId: string,
   ): boolean {
     const nodeId = `${node.name}@${node.version}`;
+    const storePath = this.extractStorePath(node);
     if (
       nodeId === targetPackageId ||
-      this.extractInstanceIdFromPath(node) === targetPackageId
+      (storePath !== null && storePath === targetPackageId)
     ) {
       return true;
     }
@@ -1247,8 +1245,8 @@ export class DependencyTracker {
       }
 
       const nodeId = `${node.name}@${node.version}`;
-      // Also get the path-based ID for matching with peer dep context
-      const pathBasedId = this.extractInstanceIdFromPath(node);
+      // Also get the store path for matching with peer dep context
+      const storePath = this.extractStorePath(node);
 
       // Prevent infinite recursion from circular dependencies in current path
       if (visitedNodeIds.has(nodeId)) {
@@ -1274,7 +1272,7 @@ export class DependencyTracker {
       // Exact match: node's resolved ID (lockfile key or store path) matches target
       const isExactMatch =
         nodeId === targetPackageId ||
-        pathBasedId === targetPackageId ||
+        (storePath !== null && storePath === targetPackageId) ||
         displayId === targetPackageId;
 
       if (isExactMatch) {
@@ -1396,8 +1394,8 @@ export class DependencyTracker {
       }
 
       const nodeId = `${node.name}@${node.version}`;
-      // Also get the path-based ID for matching with peer dep context
-      const pathBasedId = this.extractInstanceIdFromPath(node);
+      // Also get the store path for matching with peer dep context
+      const storePath = this.extractStorePath(node);
 
       // Check if this node ID creates a circular dependency in current path
       if (visitedNodeIds.has(nodeId)) {
@@ -1424,7 +1422,7 @@ export class DependencyTracker {
       // Exact match: node's resolved ID matches target
       const isExactMatch =
         nodeId === targetPackageId ||
-        pathBasedId === targetPackageId ||
+        (storePath !== null && storePath === targetPackageId) ||
         displayId === targetPackageId;
 
       if (isExactMatch) {
