@@ -20,6 +20,7 @@ import {
   resolveStorePathToLockfileKey,
   linkNodeIdentity,
 } from "../core/dep-path.js";
+import { computeShallowestDepths } from "../core/tree-depth.js";
 
 export interface DuplicatesOptions {
   showAll?: boolean;
@@ -62,6 +63,7 @@ export class DuplicatesUsecase {
   private dependencyTracker: DependencyTracker;
   private lockfile: PnpmLockfile;
   private lockfilePath: string;
+  private depth: number;
   private modulesYaml?: ModulesYaml;
   private hoistedVersions?: Map<string, HoistedVersionInfo[]>; // packageName -> hoisted version info
   private printStorePath = false; // Show store paths instead of lockfile key format
@@ -72,6 +74,7 @@ export class DuplicatesUsecase {
     depth: number = 10,
   ) {
     this.lockfilePath = lockfilePath;
+    this.depth = depth;
     this.dependencyTracker = new DependencyTracker(lockfilePath, depth);
     this.lockfile = lockfile;
   }
@@ -320,7 +323,7 @@ export class DuplicatesUsecase {
     const instancesMap = new Map<string, PackageInstance>();
 
     for (const [importerPath, tree] of Object.entries(trees)) {
-      this.collectFromTreeNodes(tree, importerPath, instancesMap, new Set());
+      this.collectFromTreeNodes(tree, importerPath, instancesMap);
     }
 
     return instancesMap;
@@ -423,21 +426,19 @@ export class DuplicatesUsecase {
   }
 
   /**
-   * Recursively collect package instances from tree nodes
+   * Collect package instances from tree nodes, limited to this.depth levels
+   * below the importer's direct dependencies. See traverseTreeAndBuildMap in
+   * dependency-tracker.ts for why depth is enforced here rather than by how
+   * deep the tree itself goes.
    */
   private collectFromTreeNodes(
     nodes: DependencyNode[],
     importerPath: string,
     instancesMap: Map<string, PackageInstance>,
-    visitedNodes: Set<DependencyNode> = new Set(),
   ): void {
-    for (const node of nodes) {
-      // Prevent infinite recursion from circular node references
-      if (visitedNodes.has(node)) {
-        continue;
-      }
-      visitedNodes.add(node);
+    const depths = computeShallowestDepths(nodes, this.depth);
 
+    for (const node of depths.keys()) {
       // Extract unique instance ID from path which includes peer dependency context
       // This allows detecting multiple instances with same name@version but different peer deps
       const instanceId = this.extractInstanceIdFromPath(node);
@@ -457,16 +458,6 @@ export class DuplicatesUsecase {
 
         // Add this project to the instance
         instancesMap.get(instanceId)!.projects.add(importerPath);
-
-        // Recursively process child dependencies
-        if (node.dependencies) {
-          this.collectFromTreeNodes(
-            node.dependencies,
-            importerPath,
-            instancesMap,
-            visitedNodes,
-          );
-        }
       }
     }
   }
