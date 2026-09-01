@@ -21,7 +21,10 @@ import type { DependencyNode } from "@pnpm/deps.inspection.tree-builder";
 import fs, { type Dirent } from "fs";
 import path from "path";
 import { resolveStorePathToLockfileKey } from "./dep-path.js";
-import { materializeDedupedNodes } from "./tree-dedup.js";
+import {
+  materializeDedupedNodes,
+  canonicalizeLinkVersions,
+} from "./tree-dedup.js";
 import { computeShallowestDepths } from "./tree-depth.js";
 
 /**
@@ -144,45 +147,58 @@ export class DependencyTracker {
     }
 
     try {
-      // Call buildDependenciesTree once PER PROJECT rather than once for the
-      // whole workspace (the `undefined` / auto-detect-all-projects form).
-      // The library shares one dependency graph and one materialization
-      // cache across every project passed to a single call, keyed by
-      // (graph nodeId, remaining tree depth) — neither of which is exposed
-      // on the public DependencyNode shape. That makes a `deduped: true`
-      // stub impossible to safely resolve from outside when the cache spans
-      // multiple projects: a heuristic match on `path`+`peersSuffixHash`
-      // (tried and reverted — see git history and CHANGELOG) can and did
-      // attribute one project's dependencies to a different, unrelated
-      // project. Scoping each call to a single project makes that
-      // structurally impossible — the shared graph can only ever contain
-      // nodes reachable from that one project — at the cost of one lockfile
-      // read per project instead of one for the whole workspace.
+      // Call buildDependenciesTree ONCE for the whole workspace (all
+      // projects sharing one dependency graph and one materialization
+      // cache), passing depth: Infinity — NEVER a finite number — and
+      // enforcing --depth ourselves while walking the result instead (see
+      // computeShallowestDepths / tree-dedup.ts's CALLER CONTRACT for why).
+      //
+      // This used to call the library once PER PROJECT with a finite depth,
+      // to keep each call's materialization cache scoped to just that one
+      // project — necessary because the library's real cache key is (graph
+      // nodeId, remaining tree depth), neither of which is exposed on the
+      // public DependencyNode shape, so a `deduped: true` stub couldn't be
+      // safely resolved from outside once the cache spanned multiple
+      // projects with different remaining depths (a heuristic attempt at
+      // this attributed one project's dependencies to a different,
+      // unrelated project — see git history and CHANGELOG). With depth:
+      // Infinity, "remaining depth" collapses out of that key entirely
+      // (`materializeCacheKey` returns the bare nodeId when depth ===
+      // Infinity — see the library's getTree.js) — the ambiguity that made
+      // the per-project split necessary is gone, so a single batched call
+      // sharing one cache across all projects is safe again, and faster
+      // (one lockfile parse instead of one per project).
       const lockfile = this.getLockfile();
-      const importerIds = Object.keys(lockfile.importers || {});
+      const importerIds = Object.keys(lockfile.importers || {}).sort();
+      const projectPaths = importerIds.map((id) =>
+        path.join(this.lockfileDir, id),
+      );
+
+      const hierarchyResult = await buildDependenciesTree(projectPaths, {
+        depth: Infinity,
+        lockfileDir: this.lockfileDir,
+        virtualStoreDirMaxLength: 120,
+      });
+
+      // Resolve every deduped stub's real children from the fully-expanded
+      // occurrence found anywhere in this batch result...
+      materializeDedupedNodes(hierarchyResult);
+      // ...then rebase every link node's version onto lockfileDir: with
+      // content now shared across projects, a link subtree's version may
+      // still be relative to whichever project first materialized it
+      // (rewriteLinkVersionDir), which is wrong for every other project
+      // that reuses it. See canonicalizeLinkVersions's own doc comment.
+      canonicalizeLinkVersions(hierarchyResult, this.lockfileDir);
 
       this.dependencyTrees = {};
 
       for (const importerId of importerIds) {
         const projectDir = path.join(this.lockfileDir, importerId);
-        const hierarchyResult = await buildDependenciesTree([projectDir], {
-          depth: this.depth,
-          lockfileDir: this.lockfileDir,
-          virtualStoreDirMaxLength: 120,
-        });
         // Empty when this importer isn't in the currently-installed lockfile
         // (e.g. a partial `pnpm install --filter` that skipped it) — that
         // project's tree silently comes back empty rather than falling back
-        // to buildTreesFromLockfile for just that one project. Pre-existing
-        // behavior, not introduced by per-project scoping: the same gap
-        // existed in the single whole-workspace call this replaced.
+        // to buildTreesFromLockfile for just that one project.
         const hierarchy = hierarchyResult[projectDir] ?? {};
-
-        // Dedup stubs can still appear within a single project's own tree
-        // (the same package reached via two sibling branches at the same
-        // depth) — safe to resolve here since the cache is scoped to just
-        // this one project.
-        materializeDedupedNodes({ [projectDir]: hierarchy });
 
         this.dependencyTrees[importerId] = [
           ...(hierarchy.dependencies || []),

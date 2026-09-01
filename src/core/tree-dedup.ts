@@ -64,28 +64,27 @@ function resolveDeduped(
  * came back deduped, and duplicate detection dropped from 123 to 53 affected
  * projects before accounting for this.
  *
- * CALLER CONTRACT — `trees` MUST come from a single `buildDependenciesTree`
- * call scoped to ONE project (a single-element `projectPaths` array), never
- * from a call spanning multiple projects. The library's real cache key is
- * `(graph nodeId, remaining tree depth)` (see `getTree.js`'s
- * `materializeCacheKey`), neither of which is exposed on the public
- * `DependencyNode` shape this function receives. The `path`+`peersSuffixHash`
- * key below is only a safe proxy for that when every node in `trees`
- * originates from the same project's own dependency graph — spanning
- * multiple projects' results let it substitute one project's dependencies
- * onto a different, unrelated project's tree (confirmed on the same
- * monorepo above: reverted, see git history and CHANGELOG for that
- * incident). `dependency-tracker.ts` calls `buildDependenciesTree` once per
- * project specifically so this contract holds.
+ * CALLER CONTRACT — `trees` MUST come from a `buildDependenciesTree` call
+ * made with `depth: Infinity`, whether that call is scoped to one project or
+ * batches every project at once. A call with any FINITE depth spanning more
+ * than one project is forbidden — the library's real cache key is (graph
+ * nodeId, remaining tree depth) (see `getTree.js`'s `materializeCacheKey`),
+ * and at finite depth neither half of that key is exposed on the public
+ * `DependencyNode` shape this function receives; the `path`+`peersSuffixHash`
+ * key below was tried as a proxy for it at finite depth across a
+ * multi-project batch and it substituted one project's dependencies onto a
+ * different, unrelated project's tree (confirmed on a real monorepo,
+ * reverted — see git history and CHANGELOG for that incident).
  *
- * Residual limitation even within one project: this key still cannot
- * distinguish two occurrences of the same node reached at genuinely
- * different remaining depths (rare, but possible in a single project's own
- * graph). Where that happens, the substituted subtree may be shallower or
- * deeper than the library would have produced for that exact occurrence.
- * This is a narrower, project-local version of the same identity gap, not
- * fully closed — see the follow-up task on adding a real multi-project
- * fixture regression test that would also help characterize this.
+ * At `depth: Infinity` this danger doesn't exist: `materializeCacheKey`
+ * special-cases it to return the bare nodeId, dropping the depth component
+ * of the key entirely — so every occurrence of a given node, in any project,
+ * caches to the same entry and gets the same (complete, untruncated)
+ * content. `path`+`peersSuffixHash` is then a safe, redundant proxy for that
+ * nodeId (see `dependency-tracker.ts`'s `buildTreesFromPnpm`, which always
+ * passes `depth: Infinity` to the library and enforces `--depth` itself
+ * while walking the result instead — never pass a finite depth to the
+ * library from a new call site without re-reading this).
  *
  * Mutates every tree in `trees` in place, replacing each deduped node's
  * `dependencies` with the fully-expanded subtree found elsewhere in the same
