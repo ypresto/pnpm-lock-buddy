@@ -61,18 +61,26 @@ projects that don't use `namedRegistries` are unaffected.
   tool didn't originally know about and so treated as a childless leaf. A
   first fix attempt (resolving each stub from another matching occurrence
   found by resolved path across a whole-workspace, all-projects-at-once tree
-  build) undercounted less but overcounted worse — it attributed one
-  project's dependencies to a different, unrelated project, because the
-  library's real cache key includes the remaining tree depth, which isn't
-  exposed on the public node shape a fix could match against. Fixed by
-  building each project's tree with its own independent call instead
-  (eliminating cross-project cache sharing structurally — confirmed directly
-  against the same monorepo, both at the raw library level and end to end);
-  this is the same pattern pnpm's own CLI falls back to for the cases it
-  can't share a single cache for. The trade-off is speed: on the test
-  monorepo this runs ~3x slower than a single shared-cache call would
-  (~40s vs. ~12s for the whole workspace) — a faster fix that preserves
-  correctness is being evaluated. If you hit tree-related discrepancies on a
+  build with a *finite* depth) undercounted less but overcounted worse — it
+  attributed one project's dependencies to a different, unrelated project,
+  because at finite depth the library's real cache key includes the
+  remaining tree depth, which isn't exposed on the public node shape a fix
+  could match against. Building each project's tree with its own
+  independent call fixed that (eliminating cross-project cache sharing
+  structurally) at a real cost: ~3x slower than a single shared-cache call
+  (~40s vs. ~12s on the test monorepo). The actual fix passes `depth:
+  Infinity` to a single call spanning every project instead: at infinite
+  depth the library's cache key collapses to just the node identity (no
+  depth component left to be ambiguous — see `tree-dedup.ts`'s doc comments
+  for the source-level detail), so a single shared-cache batch call is safe
+  again, and empirically ~10x faster than the per-project workaround,
+  beating the original per-workspace baseline. `--depth` itself is now
+  enforced by this tool while walking the (uncapped) result, not by the
+  tree-builder call. Verified on the same monorepo: exact project count
+  match (123/123), duplicate-package count within 0.06% of the per-project
+  fix's own count (an expected, small variance from where a shared subtree's
+  "first materializer" lands, not a regression), and no cross-project
+  misattribution in spot checks. If you hit tree-related discrepancies on a
   large real monorepo we haven't tested against, please open an issue.
 
 ## Quick Start
