@@ -115,7 +115,10 @@ describe("dependency tree build cost", () => {
       npmLayers: NPM_LAYERS,
     });
     const lockfilePath = writeSyntheticLockfile(workspace.lockfile, "map-l10");
-    const tracker = new DependencyTracker(lockfilePath);
+    // This bench is about path-explosion avoidance in the dependency map,
+    // not --depth truncation: the target sits at npm layer NPM_LAYERS - 1,
+    // so depth must comfortably exceed that for it to be reachable at all.
+    const tracker = new DependencyTracker(lockfilePath, NPM_LAYERS + 5);
 
     const start = performance.now();
     const importers = await tracker.getImportersForPackage(
@@ -151,7 +154,9 @@ describe("dependency tree build cost", () => {
       npmWidth: 2,
     });
     const lockfilePath = writeSyntheticLockfile(workspace.lockfile, "npm-dia");
-    const tracker = new DependencyTracker(lockfilePath);
+    // Same reasoning as above: target is at npm layer 17, so depth must
+    // exceed that for this path-explosion bench to be meaningful.
+    const tracker = new DependencyTracker(lockfilePath, 20);
 
     const trees = await tracker.getDependencyTrees();
     const nodes = measureTrees(trees).distinctNodes;

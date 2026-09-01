@@ -22,6 +22,7 @@ import fs, { type Dirent } from "fs";
 import path from "path";
 import { resolveStorePathToLockfileKey } from "./dep-path.js";
 import { materializeDedupedNodes } from "./tree-dedup.js";
+import { computeShallowestDepths } from "./tree-depth.js";
 
 /**
  * Tracks transitive dependencies and provides lookup functionality
@@ -807,30 +808,27 @@ export class DependencyTracker {
     this.dependencyMap = new Map();
 
     for (const [importerId, tree] of Object.entries(this.dependencyTrees)) {
-      // Fresh per importer: the map records which importers reach a package,
-      // so a node visited under one importer must still be walked under
-      // another.
-      this.traverseTreeAndBuildMap(tree, importerId, new Set());
+      this.traverseTreeAndBuildMap(tree, importerId);
     }
   }
 
   /**
-   * Traverse tree and build dependency map
+   * Traverse tree and build dependency map, limited to this.depth levels
+   * below the importer's direct dependencies (depth 1). Since trees are now
+   * built with no depth limit of their own (see tree-dedup.ts's CALLER
+   * CONTRACT), --depth has to be enforced here instead of by how deep the
+   * tree itself goes; computeShallowestDepths gives each node its shallowest
+   * reachable depth in one BFS pass (also serving as the DAG identity-visit
+   * that keeps this from walking every distinct path instead of every node,
+   * which is exponential in a diamond-shaped dependency graph).
    */
   private traverseTreeAndBuildMap(
     nodes: DependencyNode[],
     importerId: string,
-    visited: Set<DependencyNode>,
   ): void {
-    for (const node of nodes) {
-      // Subtrees are shared, so the trees are DAGs. Without an identity check
-      // this walks every distinct path instead of every node, which is
-      // exponential in a diamond-shaped dependency graph.
-      if (visited.has(node)) {
-        continue;
-      }
-      visited.add(node);
+    const depths = computeShallowestDepths(nodes, this.depth);
 
+    for (const node of depths.keys()) {
       const packageId = `${node.name}@${node.version}`;
 
       if (!this.dependencyMap.has(packageId)) {
@@ -844,6 +842,12 @@ export class DependencyTracker {
 
       if (node.dependencies) {
         for (const child of node.dependencies) {
+          // Skip a child only reachable beyond this.depth through every
+          // path — computeShallowestDepths already excludes it, so it
+          // wouldn't get its own map entry from its own depths.keys() pass
+          // either; skip its directDependents edge here for the same reason.
+          if (!depths.has(child)) continue;
+
           const childId = `${child.name}@${child.version}`;
           if (!this.dependencyMap.has(childId)) {
             this.dependencyMap.set(childId, {
@@ -853,8 +857,6 @@ export class DependencyTracker {
           }
           this.dependencyMap.get(childId)!.directDependents.add(packageId);
         }
-
-        this.traverseTreeAndBuildMap(node.dependencies, importerId, visited);
       }
     }
   }
