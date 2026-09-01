@@ -90,7 +90,12 @@ Infinity` to a single call spanning every project instead: at infinite
   detected in the first place (`UNBOUNDED_TREE_DEPTH`'s doc comment in
   `tree-depth.ts` has the reasoning: detection is a BFS over an already-deduped,
   O(N) tree, so it's depth-unbounded-safe, unlike path enumeration through a
-  wide graph). If you hit tree-related discrepancies on a large real monorepo
+  wide graph). Re-verified on the same monorepo after that fix: the count
+  rose to 23663 (above the per-project fix's 23649, since detection is now
+  genuinely exhaustive rather than matching that setup's own depth-10 cap by
+  coincidence), the previously-missed packages are now found, and there was
+  no measurable performance cost. If you hit tree-related discrepancies on a
+  large real monorepo
   we haven't tested against, please open an issue.
 
 ## Quick Start
