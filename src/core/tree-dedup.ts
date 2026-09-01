@@ -6,13 +6,22 @@ import type {
 
 /**
  * Unique identity key for a DependencyNode within a tree build's
- * materialization cache. `path` alone is already sufficient in practice —
- * confirmed directly (test/unit/core/tree-builder-batch-integration.test.ts):
- * for a real `package`-type node, the virtual-store path itself encodes the
- * full resolved depPath, peer suffix included, so two differently-resolved
- * peer variants of the same package always get different `path`s too.
- * `peersSuffixHash` is folded in anyway as harmless, redundant defense in
- * depth in case some node shape doesn't hold that invariant.
+ * materialization cache. `path` alone is already sufficient for the normal,
+ * local virtual store — confirmed directly
+ * (test/unit/core/tree-builder-batch-integration.test.ts): for a real
+ * `package`-type node, the virtual-store path itself encodes the full
+ * resolved depPath, peer suffix included, so two differently-resolved peer
+ * variants of the same package always get different `path`s too.
+ *
+ * `peersSuffixHash` is folded in anyway, and isn't just defense against an
+ * unknown future node shape: pnpm's global virtual store mode
+ * (`resolvePackagePath.js`'s `isGlobalVirtualStore` branch) resolves `path`
+ * via `fs.realpathSync` to a physical store location outside this pattern,
+ * an area still actively changing upstream as of this writing — this
+ * library gives no guarantee that a GVS path is peer-variant-unique.
+ * `peersSuffixHash` comes from the depPath directly, independent of that
+ * branch, so it's real, specific protection against a code path pnpm
+ * ships today, not a hypothetical.
  */
 function nodeIdentityKey(node: DependencyNode): string {
   return `${node.path}::${node.peersSuffixHash ?? ""}`;
