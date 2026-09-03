@@ -1,0 +1,12 @@
+{
+  "name": "app-b",
+  "private": true,
+  "dependencies": {
+    "@e2e-fixture/plugin": "workspace:*",
+    "is-number": "7.0.0",
+    "is-odd": "3.0.1"
+  },
+  "devDependencies": {
+    "commander": "catalog:"
+  }
+}

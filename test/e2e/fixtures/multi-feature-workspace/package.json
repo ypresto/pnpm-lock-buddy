@@ -1,0 +1,7 @@
+{
+  "name": "e2e-fixture-root",
+  "private": true,
+  "devDependencies": {
+    "commander": "catalog:"
+  }
+}
