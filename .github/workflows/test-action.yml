@@ -29,7 +29,9 @@ jobs:
         run: pnpm build
       - name: Pack tarball
         id: pack
-        run: echo "path=$(pnpm pack --pack-destination /tmp)" >> "$GITHUB_OUTPUT"
+        # `pnpm pack` re-runs the `prepare` lifecycle script (tsc) before
+        # printing the tarball path, so only the last stdout line is the path.
+        run: echo "path=$(pnpm pack --pack-destination /tmp | tail -1)" >> "$GITHUB_OUTPUT"
 
       # Test: should detect duplicates and fail
       - name: Run duplicates check (expect duplicates)
