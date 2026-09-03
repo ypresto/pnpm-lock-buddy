@@ -8,6 +8,18 @@ else
   VERSION=$(node -e "console.log(require('${ACTION_PATH}/../package.json').version)")
 fi
 
+# A local tarball path (e.g. from `pnpm pack`, used by this repo's own CI to
+# test the current commit instead of an npm-published version) is passed to
+# `pnpm dlx` as-is; anything else is treated as an npm version/tag.
+case "${VERSION}" in
+  *.tgz | /* | ./* | ../*)
+    PACKAGE_SPEC="${VERSION}"
+    ;;
+  *)
+    PACKAGE_SPEC="pnpm-lock-buddy@${VERSION}"
+    ;;
+esac
+
 # Set NODE_OPTIONS for large lockfiles
 export NODE_OPTIONS="--max-old-space-size=${INPUT_MAX_OLD_SPACE_SIZE}"
 
@@ -51,7 +63,7 @@ ARGS+=(${INPUT_PACKAGES})
 # Run the command, capturing output
 OUTPUT_FILE=$(mktemp)
 EXIT_CODE=0
-pnpm dlx "pnpm-lock-buddy@${VERSION}" "${ARGS[@]}" 2>&1 | tee "${OUTPUT_FILE}" || EXIT_CODE=$?
+pnpm dlx "${PACKAGE_SPEC}" "${ARGS[@]}" 2>&1 | tee "${OUTPUT_FILE}" || EXIT_CODE=$?
 
 # Set outputs
 if [ "${EXIT_CODE}" -ne 0 ]; then

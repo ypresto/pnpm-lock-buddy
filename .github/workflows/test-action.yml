@@ -17,13 +17,28 @@ jobs:
         with:
           node-version: 22
 
+      # Pack the current commit instead of relying on `version` defaulting to
+      # package.json's version and fetching that from npm: package.json is
+      # routinely bumped ahead of the matching `npm publish`, which would
+      # otherwise make this job fail on every push until publish catches up,
+      # and even once published it would only ever test the last release
+      # rather than this commit's code.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+      - name: Pack tarball
+        id: pack
+        run: echo "path=$(pnpm pack --pack-destination /tmp)" >> "$GITHUB_OUTPUT"
+
       # Test: should detect duplicates and fail
       - name: Run duplicates check (expect duplicates)
         id: duplicates
         uses: ./duplicates
         continue-on-error: true
         with:
-          packages: '@pnpm/types @pnpm/constants'
+          version: ${{ steps.pack.outputs.path }}
+          packages: 'chalk'
           per-project: 'false'
           comment: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
 
@@ -41,6 +56,7 @@ jobs:
         id: no-duplicates
         uses: ./duplicates
         with:
+          version: ${{ steps.pack.outputs.path }}
           packages: 'commander'
           per-project: 'false'
 

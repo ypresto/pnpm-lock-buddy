@@ -73,13 +73,11 @@ describe("DuplicatesUsecase", () => {
           dependencies: {
             "pkg-a": {
               specifier: "1.0.0",
-              version:
-                "1.0.0(framework@2.0.0(compiler@3.0.0))(runtime@4.0.0)",
+              version: "1.0.0(framework@2.0.0(compiler@3.0.0))(runtime@4.0.0)",
             },
             "pkg-b": {
               specifier: "1.0.0",
-              version:
-                "1.0.0(framework@2.0.0(compiler@3.1.0))(runtime@4.0.0)",
+              version: "1.0.0(framework@2.0.0(compiler@3.1.0))(runtime@4.0.0)",
             },
           },
         },
@@ -92,14 +90,12 @@ describe("DuplicatesUsecase", () => {
       snapshots: {
         "pkg-a@1.0.0(framework@2.0.0(compiler@3.0.0))(runtime@4.0.0)": {
           dependencies: {
-            shared:
-              "1.0.0(framework@2.0.0(compiler@3.0.0))(runtime@4.0.0)",
+            shared: "1.0.0(framework@2.0.0(compiler@3.0.0))(runtime@4.0.0)",
           },
         },
         "pkg-b@1.0.0(framework@2.0.0(compiler@3.1.0))(runtime@4.0.0)": {
           dependencies: {
-            shared:
-              "1.0.0(framework@2.0.0(compiler@3.1.0))(runtime@4.0.0)",
+            shared: "1.0.0(framework@2.0.0(compiler@3.1.0))(runtime@4.0.0)",
           },
         },
         "shared@1.0.0(framework@2.0.0(compiler@3.0.0))(runtime@4.0.0)": {},
@@ -190,10 +186,7 @@ describe("DuplicatesUsecase", () => {
 
     it("findDuplicates: ignoreProjects removes a project, dropping duplicates that become single-instance", async () => {
       const lockfilePath = writeMockLockfile(multiProjectLockfile);
-      const usecase = new DuplicatesUsecase(
-        lockfilePath,
-        multiProjectLockfile,
-      );
+      const usecase = new DuplicatesUsecase(lockfilePath, multiProjectLockfile);
 
       // Without ignore: react has 2 instances (18.2.0 used by both projects, 19.0.0 used by apps/web via ui-lib)
       const withoutIgnore = await usecase.findDuplicates({
@@ -213,10 +206,7 @@ describe("DuplicatesUsecase", () => {
 
     it("findDuplicates: ignorePackageProjects only ignores specific package in specific project", async () => {
       const lockfilePath = writeMockLockfile(multiProjectLockfile);
-      const usecase = new DuplicatesUsecase(
-        lockfilePath,
-        multiProjectLockfile,
-      );
+      const usecase = new DuplicatesUsecase(lockfilePath, multiProjectLockfile);
 
       // lodash has 2 instances: 4.17.20 (direct in both) and 4.17.21 (via lodash-wrapper in both)
       // Ignoring apps/web:lodash removes apps/web from lodash instances
@@ -235,10 +225,7 @@ describe("DuplicatesUsecase", () => {
 
     it("findPerProjectDuplicates: ignoreProjects excludes project from results", async () => {
       const lockfilePath = writeMockLockfile(multiProjectLockfile);
-      const usecase = new DuplicatesUsecase(
-        lockfilePath,
-        multiProjectLockfile,
-      );
+      const usecase = new DuplicatesUsecase(lockfilePath, multiProjectLockfile);
 
       // Without ignore: apps/web has per-project duplicates (react 18+19, lodash 4.17.20+21)
       const withoutIgnore = await usecase.findPerProjectDuplicates({});
@@ -259,10 +246,7 @@ describe("DuplicatesUsecase", () => {
 
     it("findPerProjectDuplicates: ignorePackageProjects excludes specific package in specific project", async () => {
       const lockfilePath = writeMockLockfile(multiProjectLockfile);
-      const usecase = new DuplicatesUsecase(
-        lockfilePath,
-        multiProjectLockfile,
-      );
+      const usecase = new DuplicatesUsecase(lockfilePath, multiProjectLockfile);
 
       // apps/web has react duplicates and lodash duplicates
       const withoutIgnore = await usecase.findPerProjectDuplicates({});

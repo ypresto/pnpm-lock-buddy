@@ -11,9 +11,7 @@ describe("parseIgnoreFile", () => {
   });
 
   it("parses package+project pair lines (project:package)", () => {
-    const result = parseIgnoreFile(
-      "apps/web:react\npackages/ui:@types/react",
-    );
+    const result = parseIgnoreFile("apps/web:react\npackages/ui:@types/react");
     expect(result).toEqual({
       projects: [],
       packageProjects: [

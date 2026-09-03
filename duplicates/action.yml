@@ -37,7 +37,7 @@ inputs:
     required: false
     default: '8192'
   version:
-    description: 'pnpm-lock-buddy version to use (default: version from this action)'
+    description: 'pnpm-lock-buddy version to use (default: version from this action), or a local tarball path (e.g. from `pnpm pack`)'
     required: false
     default: ''
   extra-args:
