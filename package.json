@@ -1,6 +1,6 @@
 {
   "name": "pnpm-lock-buddy",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "CLI tool for analyzing pnpm-lock.yaml files",
   "author": "ypresto <yuya.presto@gmail.com>",
   "license": "MIT",

@@ -1,14 +1,26 @@
 # Changelog
 
+## [0.4.1] - 2026-09-04
+
+### Added
+
+- **Verified against a real pnpm v12 install**: the production monorepo referenced under 0.4.0 was later upgraded to pnpm v12.2.1 in real use — a genuine multi-document lockfile and a real `node_modules/.pnpm` with ~7900 installed entries, not a synthetic fixture. This tool ran against it cleanly (123/123 projects via `--per-project`, no crashes, ~2.3s), consistent with the pnpm v11.9.0 run documented under 0.4.0.
+- `pnpm test:e2e`: an end-to-end test suite that runs a real `pnpm install` with the latest pnpm v11 and v12 CLIs (via `pnpm dlx`, independent of this repo's own pinned pnpm) against one workspace fixture combining a workspace, a `workspace:*` link, a catalog entry, and peer dependencies, and asserts pnpm-lock-buddy's duplicate detection is identical across both. Excluded from the default `pnpm test` run (needs network access, much slower) via a separate `vitest.e2e.config.ts`.
+
+### Fixed
+
+- **README/CHANGELOG correction**: 0.4.0 claimed the multi-document lockfile format was "introduced in pnpm v11.25.0/v12.0.0"; real installs show that's only half right. Writing the format is v12-only: a fresh `pnpm@11.25.0 install` with `packageManager` pinned to itself still writes the old single-document format, and a later `pnpm@11.25.0 install` that only adds a dependency to an *existing* v12-written multi-document lockfile leaves it multi-document without touching the env document — v11 reads and preserves the format but never creates it, while even a no-op pnpm v12 `install` (no dependency change) rewrites an existing single-document lockfile to multi-document.
+- The GitHub Action's own CI self-test (`test-action.yml`) installed pnpm-lock-buddy from the npm registry at whatever version `package.json` declared, so it failed on every push between bumping that version and actually publishing it. Now packs the current commit (`pnpm pack`) and points the action at that local tarball instead, so it always tests the commit under test rather than a (possibly not-yet-published) version string — see `duplicates/run.sh` and `duplicates/action.yml`'s `version` input, which now also accepts a local tarball path.
+
+No runtime behavior changed in this release; it's a verification and tooling-only release.
+
 ## [0.4.0] - 2026-08-31
 
 ### Added
 
-- Support for pnpm v12's multi-document `pnpm-lock.yaml` format (an "env" document ahead of the project document, written for a pinned `packageManager` or real config dependencies). `loadLockfile` now reads every document and uses the last one, per pnpm's own guidance for dependency-graph consumers, and ignores a trailing empty document produced by a bare trailing `---` separator. Writing this format is v12-only, confirmed directly with real installs: a fresh `pnpm@11.25.0 install` with `packageManager` pinned to itself still writes the old single-document format, and a later `pnpm@11.25.0 install` that only adds a dependency to an *existing* v12-written multi-document lockfile leaves it multi-document without touching the env document — v11 reads and preserves the format but never creates it, while even a no-op pnpm v12 `install` (no dependency change) rewrites an existing single-document lockfile to multi-document.
+- Support for pnpm v11.25.0/v12.0.0's multi-document `pnpm-lock.yaml` format (an "env" document ahead of the project document, written when config dependencies or a pinned pnpm version are present). `loadLockfile` now reads every document and uses the last one, per pnpm's own guidance for dependency-graph consumers, and ignores a trailing empty document produced by a bare trailing `---` separator. (See 0.4.1: only pnpm v12 actually writes this format.)
 - `list`/`search` command usage and a `duplicates`/`list` options reference to the README (previously undocumented).
 - `README.md`: pnpm v9-v12 compatibility notes, a known limitation for named-registry (`namedRegistries`) packages using registry-qualified snapshot keys, and a "Caveats" section clarifying that this tool's pnpm-v12 support is lockfile-*format* compatibility, not "runs the same engine code" (pnpm v12's Rust engine no longer uses the `@pnpm/*` JS packages this tool depends on; pnpm v11's TS CLI still does, verified directly against both CLIs' published bundles).
-- `pnpm test:e2e`: an end-to-end test suite that runs a real `pnpm install` with the latest pnpm v11 and v12 CLIs (via `pnpm dlx`, independent of this repo's own pinned pnpm) against one workspace fixture combining a workspace, a `workspace:*` link, a catalog entry, and peer dependencies, and asserts pnpm-lock-buddy's duplicate detection is identical across both. Excluded from the default `pnpm test` run (needs network access, much slower) via a separate `vitest.e2e.config.ts`.
-- **Verified against a real pnpm v12 install**: the production monorepo referenced below was later upgraded to pnpm v12.2.1 in real use — a genuine multi-document lockfile and a real `node_modules/.pnpm` with ~7900 installed entries, not a synthetic fixture. This tool ran against it cleanly (123/123 projects via `--per-project`, no crashes, ~2.3s), consistent with the pnpm v11.9.0 run below.
 
 ### Fixed
 
