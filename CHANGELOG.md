@@ -12,12 +12,16 @@
 - Correct docs: only pnpm v12 writes the multi-document lockfile format (v11 only reads it).
 - Fix CI self-test depending on the npm-published version instead of the current commit.
 
+### Removed
+
+- Remove `list`/`search` command docs from the README.
+
 ## [0.4.0] - 2026-08-31
 
 ### Added
 
 - Support pnpm v12's multi-document lockfile format (env + project documents).
-- Document `list`/`search` usage and `duplicates`/`list` options in the README.
+- Update the README.
 
 ### Fixed
 

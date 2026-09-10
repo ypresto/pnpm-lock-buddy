@@ -63,13 +63,6 @@ pnpm-lock-buddy duplicates --omit dev
 
 # CI/CD: exit code 1 if duplicates found
 pnpm-lock-buddy duplicates --exit-code
-
-# Search for packages by name (supports wildcards and semver ranges)
-pnpm-lock-buddy list lodash
-pnpm-lock-buddy list "react*" --output json
-
-# List every package in the lockfile
-pnpm-lock-buddy list
 ```
 
 ## Use Case: Detect Same Package with Different Peer Dependencies
@@ -153,16 +146,6 @@ apps/web:@types/react
 --ignore-file <path>    Path to ignore file for suppressing results
 --exit-code             Exit 1 if duplicates found (for CI/CD)
 -o, --output <format>   Output format: tree, json
-```
-
-### `list` (alias `search`)
-
-```
--f, --file <path>       Path to pnpm-lock.yaml file
--e, --exact             Only match exact versions (disable semver matching)
--p, --project <projects...>  Filter by importer/project paths
---ignore-dev            Shorthand for --omit=dev
--o, --output <format>   Output format: tree, json, list (default: tree)
 ```
 
 ## Output Format
