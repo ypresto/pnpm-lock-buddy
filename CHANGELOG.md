@@ -16,7 +16,7 @@
 
 ### Added
 
-- Support pnpm v9-v12 lockfile format, including multi-document YAML.
+- Support pnpm v12's multi-document lockfile format (env + project documents).
 - Document `list`/`search` usage and `duplicates`/`list` options in the README.
 
 ### Fixed
