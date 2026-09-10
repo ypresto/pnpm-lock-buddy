@@ -26,10 +26,10 @@ for details. The format itself is unchanged since v9 (`lockfileVersion`
 stays `'9.0'`), and store-path hashes are unchanged since v10.
 
 Verified against real pnpm installs, not just the documented format: a
-~135-project production monorepo running pnpm v12.2.1 in real use (see
-Caveats below), and an automated end-to-end test suite (`pnpm test:e2e`)
-that runs a real `pnpm install` with the latest pnpm v11 and v12 CLIs
-against the same workspace fixture on every run.
+~135-project production monorepo running pnpm v12.2.1 in real use, and an
+automated end-to-end test suite (`pnpm test:e2e`) that runs a real `pnpm
+install` with the latest pnpm v11 and v12 CLIs against the same workspace
+fixture on every run.
 
 If you regenerate a lockfile with pnpm v12, duplicate reports may shrink for
 packages involved in dependency cycles: v12's canonical cycle breaking
@@ -42,80 +42,6 @@ reduction in duplicate installs, not a detection regression.
 (`<name>@<registryName>:<version>`, e.g. `foo@work:1.0.0`). Store-path
 lookup for such packages may fail to resolve to the correct lockfile key;
 projects that don't use `namedRegistries` are unaffected.
-
-### Caveats
-
-- **pnpm v12's engine is a from-scratch Rust rewrite (pacquet), and no longer
-  uses the `@pnpm/*` JS packages this tool depends on for tree building and
-  dep-path parsing.** We verified this directly: the pnpm v11.24.0 CLI's own
-  bundle contains the same functions this tool calls (`buildDependenciesTree`,
-  `depPathToFilename`, etc. — and none of the old, pre-migration names), while
-  the pnpm v12.1.0 CLI package contains none of them at all — it ships only a
-  native-binary installer/loader. So this tool's pnpm-v11 compatibility is
-  "runs the same code pnpm v11 itself runs"; its pnpm-v12 compatibility is
-  "reads the lockfile format pnpm v12 writes", not "uses the same engine".
-  Per pnpm's own `@pnpm/napi` package README, these JS packages remain
-  published going forward because the v12 engine has no part in them (typed
-  data shapes, and small pure helpers too hot-path to justify a JS/Rust
-  boundary crossing) — not because pnpm v12 calls into them.
-- **Verified against a real pnpm v12 install**: the same production
-  monorepo referenced below was later upgraded to pnpm v12.2.1 in real use
-  — a genuine multi-document lockfile and a real `node_modules/.pnpm` with
-  ~7900 installed entries, not a synthetic fixture. This tool ran against
-  it cleanly (123/123 projects via `--per-project`, no crashes, ~2.3s,
-  consistent with the pnpm v11.9.0 run below). This is now also covered by
-  an automated regression, `pnpm test:e2e`: it runs a real `pnpm install`
-  with the latest pnpm v11 and v12 CLIs (via `pnpm dlx`, independent of
-  this repo's own pinned pnpm) against one workspace fixture that combines
-  a workspace, a `workspace:*` link, a catalog entry, and peer
-  dependencies, and asserts pnpm-lock-buddy's duplicate detection is
-  identical across both. If you hit an issue on a v12-installed project we
-  haven't tested against, please open an issue.
-- **This tool's dependency-tree code path was verified against a real,
-  ~135-project production monorepo** (real `node_modules` installed by pnpm
-  v11.9.0, not a synthetic fixture) — synthetic test fixtures alone couldn't
-  have caught what this found: `@pnpm/deps.inspection.tree-builder` bounds a
-  tree build to O(N) nodes by returning every repeat occurrence of an
-  already-expanded subtree as an empty `deduped: true` stub, a contract this
-  tool didn't originally know about and so treated as a childless leaf. A
-  first fix attempt (resolving each stub from another matching occurrence
-  found by resolved path across a whole-workspace, all-projects-at-once tree
-  build with a _finite_ depth) undercounted less but overcounted worse — it
-  attributed one project's dependencies to a different, unrelated project,
-  because at finite depth the library's real cache key includes the
-  remaining tree depth, which isn't exposed on the public node shape a fix
-  could match against. Building each project's tree with its own
-  independent call fixed that (eliminating cross-project cache sharing
-  structurally) at a real cost: ~3x slower than a single shared-cache call
-  (~40s vs. ~12s on the test monorepo). The actual fix passes `depth:
-Infinity` to a single call spanning every project instead: at infinite
-  depth the library's cache key collapses to just the node identity (no
-  depth component left to be ambiguous — see `tree-dedup.ts`'s doc comments
-  for the source-level detail), so a single shared-cache batch call is safe
-  again, and empirically ~10x faster than the per-project workaround,
-  beating the original per-workspace baseline. `--depth` itself is now
-  enforced by this tool while walking the (uncapped) result, not by the
-  tree-builder call. Verified on the same monorepo: exact project count
-  match (123/123), duplicate-package count within 0.06% of the per-project
-  fix's own count, and no cross-project misattribution in spot checks. That
-  0.06% (21 instances, all confirmed reachable only via dev/peer/link chains
-  11+ edges deep, all of which reappeared identically at `--depth 20`) traced
-  to `--depth` still limiting _detection_ at the time: this tool's own BFS
-  "shallowest reachable depth" and the old per-project setup's
-  library-internal "remaining depth" accounting didn't weight dev/peer/link
-  edges identically right at the default `--depth 10` boundary. Since fixed
-  by making detection depth-unbounded unconditionally — `--depth` now only
-  limits how far `--deps` path search recurses, never whether a duplicate is
-  detected in the first place (`UNBOUNDED_TREE_DEPTH`'s doc comment in
-  `tree-depth.ts` has the reasoning: detection is a BFS over an already-deduped,
-  O(N) tree, so it's depth-unbounded-safe, unlike path enumeration through a
-  wide graph). Re-verified on the same monorepo after that fix: the count
-  rose to 23663 (above the per-project fix's 23649, since detection is now
-  genuinely exhaustive rather than matching that setup's own depth-10 cap by
-  coincidence), the previously-missed packages are now found, and there was
-  no measurable performance cost. If you hit tree-related discrepancies on a
-  large real monorepo
-  we haven't tested against, please open an issue.
 
 ## Quick Start
 

@@ -6,16 +6,22 @@ import type {
   PackageDependencyInfo,
 } from "./types.js";
 // pnpm v11.x TS packages (this one included) are supported through at least
-// 2027-04-30 per pnpm's SECURITY.md, but pnpm v12's engine is a Rust rewrite
-// that no longer uses them internally. If this package's TS API line is
-// ever discontinued without a replacement, `@pnpm/napi` (the v12 Rust
-// engine's napi bindings; see https://pnpm.io/lockfile) is the most likely
-// migration target — but only `readLockfile` and the reverse-direction
-// `getDependents` are exposed there, not a forward tree builder, so
-// switching would mean rebuilding this class's traversal around reverse
-// lookups. It also ships ~30-40MB platform-specific native binaries with no
-// wasm/JS fallback, which is a real cost for a lightweight CLI, so it is not
-// adopted preemptively.
+// 2027-04-30 per pnpm's SECURITY.md, but pnpm v12's engine is a from-scratch
+// Rust rewrite (pacquet) that no longer uses them internally — verified
+// directly: the pnpm v11.24.0 CLI's own bundle contains the same functions
+// this file calls (buildDependenciesTree, depPathToFilename, etc.), while
+// the pnpm v12.1.0 CLI package contains none of them, shipping only a
+// native-binary installer/loader. So this tool's pnpm-v11 compatibility is
+// "runs the same code pnpm v11 itself runs"; its pnpm-v12 compatibility is
+// "reads the lockfile format pnpm v12 writes", not "uses the same engine".
+// If this package's TS API line is ever discontinued without a replacement,
+// `@pnpm/napi` (the v12 Rust engine's napi bindings; see
+// https://pnpm.io/lockfile) is the most likely migration target — but only
+// `readLockfile` and the reverse-direction `getDependents` are exposed
+// there, not a forward tree builder, so switching would mean rebuilding
+// this class's traversal around reverse lookups. It also ships ~30-40MB
+// platform-specific native binaries with no wasm/JS fallback, which is a
+// real cost for a lightweight CLI, so it is not adopted preemptively.
 import { buildDependenciesTree } from "@pnpm/deps.inspection.tree-builder";
 import type { DependencyNode } from "@pnpm/deps.inspection.tree-builder";
 import fs, { type Dirent } from "fs";
